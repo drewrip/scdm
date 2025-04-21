@@ -1,9 +1,8 @@
 use anyhow::Result;
-use chrono::serde::ts_milliseconds;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{Execute, PgPool, Postgres, QueryBuilder, Transaction};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
@@ -24,6 +23,8 @@ pub enum ParseError {
     UnknownIndex(String),
     #[error("Couldn't parse timestamp {0}")]
     TimestampParseFailed(String),
+    #[error("Couldn't insert row into CDM table {0}")]
+    InsertFailed(String),
 }
 
 fn date_time_utc_from_str<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
@@ -102,6 +103,7 @@ pub struct IterationSpecJson {
     #[serde(rename = "primary-period")]
     pub primary_period: String,
     pub status: String,
+    pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -124,7 +126,7 @@ pub struct MetricDataSpecJson {
     pub begin: DateTime<Utc>,
     #[serde(deserialize_with = "date_time_utc_from_str")]
     pub end: DateTime<Utc>,
-    pub duration: u64, // In milliseconds
+    pub duration: i64, // In milliseconds
     #[serde(deserialize_with = "number_from_str")]
     pub value: f64,
 }
@@ -215,6 +217,7 @@ pub struct RunSpecJson {
     pub benchmark: String,
     pub email: String,
     pub name: String,
+    pub description: Option<String>,
     pub source: String,
 }
 
@@ -285,6 +288,300 @@ pub enum BodyJson {
     Tag(TagJson),
 }
 
+fn parse_body(index_type: IndexType, body_jsonl: String) -> Result<BodyJson> {
+    Ok(match index_type {
+        IndexType::Iteration => {
+            BodyJson::Iteration(serde_json::from_str(&body_jsonl).map_err(|e| {
+                ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+            })?)
+        }
+        IndexType::MetricData => {
+            BodyJson::MetricData(serde_json::from_str(&body_jsonl).map_err(|e| {
+                ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+            })?)
+        }
+        IndexType::MetricDesc => {
+            BodyJson::MetricDesc(serde_json::from_str(&body_jsonl).map_err(|e| {
+                ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+            })?)
+        }
+        IndexType::Param => BodyJson::Param(serde_json::from_str(&body_jsonl).map_err(|e| {
+            ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+        })?),
+        IndexType::Period => BodyJson::Period(serde_json::from_str(&body_jsonl).map_err(|e| {
+            ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+        })?),
+        IndexType::Run => BodyJson::Run(serde_json::from_str(&body_jsonl).map_err(|e| {
+            ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+        })?),
+        IndexType::Sample => BodyJson::Sample(serde_json::from_str(&body_jsonl).map_err(|e| {
+            ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+        })?),
+        IndexType::Tag => BodyJson::Tag(serde_json::from_str(&body_jsonl).map_err(|e| {
+            ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
+        })?),
+    })
+}
+
+async fn insert_runs(txn: &mut Transaction<'_, Postgres>, runs: &Vec<&RunJson>) -> Result<u64> {
+    if runs.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO run
+        (run_uuid, begin, finish, benchmark, email, name, description, source) ",
+    );
+    qb.push_values(runs, |mut b, run| {
+        b.push_bind(run.run.run_uuid)
+            .push_bind(run.run.begin)
+            .push_bind(run.run.end)
+            .push_bind(&run.run.benchmark)
+            .push_bind(&run.run.email)
+            .push_bind(&run.run.name)
+            .push_bind(&run.run.description)
+            .push_bind(&run.run.source);
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_tags(txn: &mut Transaction<'_, Postgres>, tags: &Vec<&TagJson>) -> Result<u64> {
+    if tags.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO tag
+        (run_uuid, name, val) ",
+    );
+    qb.push_values(tags, |mut b, tag| {
+        b.push_bind(tag.run.run_uuid)
+            .push_bind(&tag.tag.name)
+            .push_bind(&tag.tag.val);
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_iterations(
+    txn: &mut Transaction<'_, Postgres>,
+    iterations: &Vec<&IterationJson>,
+) -> Result<u64> {
+    if iterations.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO iteration
+        (iteration_uuid, run_uuid, num, status, path, primary_metric, primary_period) ",
+    );
+    qb.push_values(iterations, |mut b, iteration| {
+        b.push_bind(iteration.iteration.iteration_uuid)
+            .push_bind(iteration.run.run_uuid)
+            .push_bind(iteration.iteration.num)
+            .push_bind(&iteration.iteration.status)
+            .push_bind(&iteration.iteration.path)
+            .push_bind(&iteration.iteration.primary_metric)
+            .push_bind(&iteration.iteration.primary_period);
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_params(
+    txn: &mut Transaction<'_, Postgres>,
+    params: &Vec<&ParamJson>,
+) -> Result<u64> {
+    if params.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO param
+        (iteration_uuid, arg, val) ",
+    );
+    qb.push_values(params, |mut b, param| {
+        b.push_bind(param.iteration.iteration_uuid)
+            .push_bind(&param.param.arg)
+            .push_bind(&param.param.val);
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_samples(
+    txn: &mut Transaction<'_, Postgres>,
+    samples: &Vec<&SampleJson>,
+) -> Result<u64> {
+    if samples.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO sample
+        (sample_uuid, iteration_uuid, num, status, path) ",
+    );
+    qb.push_values(samples, |mut b, sample| {
+        b.push_bind(sample.sample.sample_uuid)
+            .push_bind(&sample.iteration.iteration_uuid)
+            .push_bind(sample.sample.num)
+            .push_bind(&sample.sample.status)
+            .push_bind(&sample.sample.path);
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_periods(
+    txn: &mut Transaction<'_, Postgres>,
+    periods: &Vec<&PeriodJson>,
+) -> Result<u64> {
+    if periods.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO period
+        (period_uuid, sample_uuid, begin, finish, name) ",
+    );
+    qb.push_values(periods, |mut b, period| {
+        b.push_bind(period.period.period_uuid)
+            .push_bind(period.sample.sample_uuid)
+            .push_bind(period.period.begin)
+            .push_bind(period.period.end)
+            .push_bind(&period.period.name);
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_metric_descs(
+    txn: &mut Transaction<'_, Postgres>,
+    metric_descs: &Vec<&MetricDescJson>,
+) -> Result<u64> {
+    if metric_descs.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO metric_desc
+        (metric_desc_uuid, period_uuid, class, metric_type, source, names_list, names) ",
+    );
+    qb.push_values(metric_descs, |mut b, metric_desc| {
+        b.push_bind(metric_desc.metric_desc.metric_desc_uuid)
+            .push_bind(metric_desc.period.clone().map(|p| p.period_uuid))
+            .push_bind(&metric_desc.metric_desc.class)
+            .push_bind(&metric_desc.metric_desc.metric_type)
+            .push_bind(&metric_desc.metric_desc.source)
+            .push_bind(&metric_desc.metric_desc.names_list)
+            .push_bind(serde_json::to_string(&metric_desc.metric_desc.names).ok());
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_metric_datas(
+    txn: &mut Transaction<'_, Postgres>,
+    metric_datas: &Vec<&MetricDataJson>,
+) -> Result<u64> {
+    if metric_datas.is_empty() {
+        return Ok(0);
+    }
+
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO metric_data
+        (metric_desc_uuid, value, begin, finish, duration) ",
+    );
+    qb.push_values(metric_datas, |mut b, metric_data| {
+        b.push_bind(metric_data.metric_desc.metric_desc_uuid)
+            .push_bind(metric_data.metric_data.value)
+            .push_bind(metric_data.metric_data.begin)
+            .push_bind(metric_data.metric_data.end)
+            .push_bind(metric_data.metric_data.duration);
+    });
+    let query = qb.build();
+    let s = query.sql();
+    let res = query
+        .execute(&mut **txn)
+        .await
+        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+    Ok(res.rows_affected())
+}
+
+async fn insert_records(
+    txn: &mut Transaction<'_, Postgres>,
+    records: &Vec<BodyJson>,
+) -> Result<u64> {
+    let mut num_new = 0;
+    let mut runs = Vec::new();
+    let mut tags = Vec::new();
+    let mut iterations = Vec::new();
+    let mut params = Vec::new();
+    let mut samples = Vec::new();
+    let mut periods = Vec::new();
+    let mut metric_descs = Vec::new();
+    let mut metric_datas = Vec::new();
+
+    for record in records {
+        match record {
+            BodyJson::Run(run) => runs.push(run),
+            BodyJson::Tag(tag) => tags.push(tag),
+            BodyJson::Iteration(iteration) => iterations.push(iteration),
+            BodyJson::Param(param) => params.push(param),
+            BodyJson::Sample(sample) => samples.push(sample),
+            BodyJson::Period(period) => periods.push(period),
+            BodyJson::MetricDesc(metric_desc) => metric_descs.push(metric_desc),
+            BodyJson::MetricData(metric_data) => metric_datas.push(metric_data),
+        };
+    }
+
+    num_new += insert_runs(txn, &runs).await?;
+    num_new += insert_tags(txn, &tags).await?;
+    num_new += insert_iterations(txn, &iterations).await?;
+    num_new += insert_params(txn, &params).await?;
+    num_new += insert_samples(txn, &samples).await?;
+    num_new += insert_periods(txn, &periods).await?;
+    num_new += insert_metric_descs(txn, &metric_descs).await?;
+    num_new += insert_metric_datas(txn, &metric_datas).await?;
+    Ok(num_new)
+}
+
 pub async fn parse(pool: &PgPool, dir_path: &Path) -> Result<()> {
     // Read all of the ndjson files
     let files = fs::read_dir(dir_path).map_err(|_| {
@@ -306,6 +603,8 @@ pub async fn parse(pool: &PgPool, dir_path: &Path) -> Result<()> {
         .filter(|p| p.to_str().map(is_ndjson).unwrap_or(false))
         .collect();
 
+    let mut records: Vec<BodyJson> = Vec::new();
+
     for ndjson_path in ndjson_paths {
         let f = File::open(ndjson_path.clone()).map_err(|_| {
             ParseError::InvalidPath(format!(
@@ -322,58 +621,17 @@ pub async fn parse(pool: &PgPool, dir_path: &Path) -> Result<()> {
             let index_type = index_name_to_type(index.index._index.clone())
                 .ok_or(ParseError::UnknownIndex(index.index._index))?;
 
-            let body = match index_type {
-                IndexType::Iteration => {
-                    BodyJson::Iteration(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-                IndexType::MetricData => {
-                    BodyJson::MetricData(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-                IndexType::MetricDesc => {
-                    BodyJson::MetricDesc(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-                IndexType::Param => {
-                    BodyJson::Param(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-                IndexType::Period => {
-                    BodyJson::Period(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-                IndexType::Run => {
-                    BodyJson::Run(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-                IndexType::Sample => {
-                    BodyJson::Sample(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-                IndexType::Tag => {
-                    BodyJson::Tag(serde_json::from_str(&body_jsonl).map_err(|e| {
-                        ParseError::JSONParseFailed(format!("{:?}", index_type), e.to_string())
-                    })?)
-                }
-            };
-
-            println!("body: {:?}", body);
+            records.push(parse_body(index_type, body_jsonl)?);
         }
     }
-
     // Ingest the documents in one transaction
     let mut txn = pool.begin().await?;
-    let res = sqlx::query!("SELECT (1) as c").fetch_all(&mut *txn).await?;
+
+    let total_records = insert_records(&mut txn, &records).await?;
+
+    println!("added {} rows", total_records);
 
     txn.commit().await?;
-    println!("{:?}", res);
+
     Ok(())
 }

@@ -9,6 +9,7 @@ sqlx = { version = "0.8.3", features = [
 	"runtime-tokio",
 	"time",
 	"uuid",
+	"chrono",
 ] }
 anyhow = "1.0.97"
 clap = { version = "4.5.34", features = ["derive"] }

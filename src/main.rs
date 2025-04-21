@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool};
+use sqlx::postgres::{PgConnectOptions, PgPool};
 use std::env;
 use std::path::Path;
 use thiserror::Error;
@@ -73,18 +73,30 @@ pub enum SCDMError {
 }
 
 pub async fn build_tables(pool: &PgPool) -> Result<()> {
-    sqlx::query(cdm::SQL_TABLE_ITERATION).execute(pool).await?;
+    let mut txn = pool.begin().await?;
+    // Creation order is important here because of foreign keys.
+    // The other option is to defer the integrity check until the
+    // transaction commits.
+    sqlx::query(cdm::SQL_TABLE_RUN).execute(&mut *txn).await?;
+    sqlx::query(cdm::SQL_TABLE_TAG).execute(&mut *txn).await?;
+    sqlx::query(cdm::SQL_TABLE_ITERATION)
+        .execute(&mut *txn)
+        .await?;
+    sqlx::query(cdm::SQL_TABLE_PARAM).execute(&mut *txn).await?;
+    sqlx::query(cdm::SQL_TABLE_SAMPLE)
+        .execute(&mut *txn)
+        .await?;
+    sqlx::query(cdm::SQL_TABLE_PERIOD)
+        .execute(&mut *txn)
+        .await?;
     sqlx::query(cdm::SQL_TABLE_METRIC_DESC)
-        .execute(pool)
+        .execute(&mut *txn)
         .await?;
     sqlx::query(cdm::SQL_TABLE_METRIC_DATA)
-        .execute(pool)
+        .execute(&mut *txn)
         .await?;
-    sqlx::query(cdm::SQL_TABLE_PARAM).execute(pool).await?;
-    sqlx::query(cdm::SQL_TABLE_PERIOD).execute(pool).await?;
-    sqlx::query(cdm::SQL_TABLE_RUN).execute(pool).await?;
-    sqlx::query(cdm::SQL_TABLE_SAMPLE).execute(pool).await?;
-    sqlx::query(cdm::SQL_TABLE_TAG).execute(pool).await?;
+    txn.commit().await?;
+
     Ok(())
 }
 
@@ -134,9 +146,8 @@ async fn main() -> Result<()> {
             let dir_path = Path::new(&args.path);
             parser::parse(&pool, dir_path).await
         }
-        Command::Query(args) => {
+        Command::Query(_args) => {
             todo!("Query not implemented yet");
-            Ok(())
         }
     };
 
