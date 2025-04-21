@@ -29,7 +29,7 @@ pub struct Run {
     pub benchmark: String,
     pub email: String,
     pub name: String,
-    pub tags: Vec<(String, String)>,
+    pub description: String,
     pub source: String,
 }
 
