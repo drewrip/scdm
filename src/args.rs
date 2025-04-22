@@ -1,0 +1,234 @@
+use anyhow::Result;
+use chrono::{DateTime, Utc};
+use clap::{Args, Parser, Subcommand};
+use uuid::Uuid;
+
+use crate::SCDMError;
+
+#[derive(Debug, Parser)]
+#[clap(name = "scdm", version)]
+pub struct App {
+    #[clap(flatten)]
+    pub global_opts: GlobalOpts,
+
+    #[clap(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Debug, Args)]
+pub struct GlobalOpts {
+    /// Verbosity level
+    #[clap(long, short = 'v', action)]
+    pub verbose: bool,
+
+    /// The DB_USER Env variable takes precedence
+    #[clap(long = "db-user", short = 'u')]
+    pub db_user: Option<String>,
+
+    /// The DB_PASSWORD Env variable takes precedence
+    #[clap(long = "db-password", short = 'p')]
+    pub db_password: Option<String>,
+
+    /// The DB_URL Env variable takes precedence
+    #[clap(long = "db-url")]
+    pub db_url: Option<String>,
+
+    /// The DB_PORT Env variable takes precedence
+    #[clap(long = "db-port")]
+    pub db_port: Option<String>,
+
+    /// The DB_NAME Env variable takes precedence
+    #[clap(long = "db-name", default_value = "scdm")]
+    pub db_name: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Parse the results of a crucible iteration and import into DB
+    Parse(ParseArgs),
+    /// Query the the CDM DB
+    Query(QueryArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ParseArgs {
+    pub path: String,
+}
+
+#[derive(Debug, Args)]
+pub struct QueryArgs {
+    #[clap(subcommand)]
+    pub command: QueryCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum QueryCommand {
+    /// Retrieve information about a CDM resource
+    Get(GetArgs),
+    /// Delete a CDM resource
+    Delete(DeleteArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(
+    subcommand_value_name = "resource",
+    subcommand_help_heading = "Resources"
+)]
+pub struct GetArgs {
+    #[clap(subcommand)]
+    pub resource: GetCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GetCommand {
+    Run(GetRunArgs),
+    Tag(GetTagArgs),
+    Iteration(GetIterationArgs),
+    Param(GetParamArgs),
+    Sample(GetSampleArgs),
+    Period(GetPeriodArgs),
+    MetricDesc(GetMetricDescArgs),
+    MetricData(GetMetricDataArgs),
+}
+
+fn parse_timestamp(arg: &str) -> Result<DateTime<Utc>, SCDMError> {
+    if let Ok(human_readable) = DateTime::parse_from_rfc3339(arg) {
+        Ok(human_readable.to_utc())
+    } else {
+        let n: i64 = arg
+            .parse()
+            .map_err(|_| SCDMError::FailedTimestampParse(arg.to_string()))?;
+
+        let res = DateTime::from_timestamp_millis(n)
+            .ok_or(SCDMError::FailedTimestampParse(arg.to_string()))?;
+        Ok(res)
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct GetRunArgs {
+    #[clap(long = "run-uuid", short = 'u')]
+    pub run_uuid: Option<Uuid>,
+    /// Search for runs where "tag_name=tag_value"
+    #[clap(long = "tag", short = 't')]
+    pub tag: Option<String>,
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "begin", short = 'b', value_parser = parse_timestamp)]
+    pub begin: Option<DateTime<Utc>>,
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish", short = 'f', value_parser = parse_timestamp)]
+    pub finish: Option<DateTime<Utc>>,
+    #[clap(long = "benchmark", short = 'k')]
+    pub benchmark: Option<String>,
+    #[clap(long = "email", short = 'e')]
+    pub email: Option<String>,
+    #[clap(long = "name", short = 'n')]
+    pub name: Option<String>,
+    #[clap(long = "source", short = 's')]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetTagArgs {
+    #[clap(long = "run-uuid", short = 'r')]
+    pub run_uuid: Option<Uuid>,
+    /// Search for runs where "tag_name=tag_value"
+    #[clap(long = "tag", short = 't')]
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetIterationArgs {
+    #[clap(long = "iteration-uuid", short = 'u')]
+    pub iteration_uuid: Option<Uuid>,
+    #[clap(long = "run-uuid", short = 'r')]
+    pub run_uuid: Option<Uuid>,
+    #[clap(long = "num", short = 'n')]
+    pub num: Option<i64>,
+    #[clap(long = "status", short = 's')]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetParamArgs {
+    #[clap(long = "iteration_uuid", short = 'i')]
+    pub iteration_uuid: Option<Uuid>,
+    #[clap(long = "arg", short = 'a')]
+    pub arg: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetSampleArgs {
+    #[clap(long = "sample-uuid", short = 'u')]
+    pub sample_uuid: Option<Uuid>,
+    #[clap(long = "iteration-uuid", short = 'i')]
+    pub iteration_uuid: Option<Uuid>,
+    #[clap(long = "num", short = 'n')]
+    pub num: Option<i64>,
+    #[clap(long = "status", short = 's')]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetPeriodArgs {
+    #[clap(long = "period-uuid", short = 'u')]
+    pub period_uuid: Option<Uuid>,
+    #[clap(long = "sample-uuid", short = 's')]
+    pub sample_uuid: Option<Uuid>,
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "begin", short = 'b', value_parser = parse_timestamp)]
+    pub begin: Option<DateTime<Utc>>,
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish", short = 'f', value_parser = parse_timestamp)]
+    pub finish: Option<DateTime<Utc>>,
+    #[clap(long = "name", short = 'n')]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetMetricDescArgs {
+    #[clap(long = "metric-desc-uuid", short = 'u')]
+    pub metric_desc_uuid: Option<Uuid>,
+    #[clap(long = "period-uuid", short = 'p')]
+    pub period_uuid: Option<Uuid>,
+    #[clap(long = "class", short = 'c')]
+    pub class: Option<String>,
+    #[clap(long = "metric-type", short = 'm')]
+    pub metric_type: Option<String>,
+    #[clap(long = "source", short = 's')]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetMetricDataArgs {
+    #[clap(long = "metric-desc-uuid", short = 'u')]
+    pub metric_desc_uuid: Option<Uuid>,
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "begin", short = 'b', value_parser = parse_timestamp)]
+    pub begin: Option<DateTime<Utc>>,
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish", short = 'f', value_parser = parse_timestamp)]
+    pub finish: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Args)]
+#[command(
+    subcommand_value_name = "resource",
+    subcommand_help_heading = "Resources"
+)]
+pub struct DeleteArgs {
+    #[clap(subcommand)]
+    pub resource: DeleteCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DeleteCommand {
+    Run(GetRunArgs),
+    Tag(GetTagArgs),
+    Iteration(GetIterationArgs),
+    Param(GetParamArgs),
+    Sample(GetSampleArgs),
+    Period(GetPeriodArgs),
+    MetricDesc(GetMetricDescArgs),
+    MetricData(GetMetricDataArgs),
+}

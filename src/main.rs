@@ -1,66 +1,15 @@
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use args::Command;
+use clap::Parser;
 use sqlx::postgres::{PgConnectOptions, PgPool};
 use std::env;
 use std::path::Path;
 use thiserror::Error;
 
+pub mod args;
 pub mod cdm;
 pub mod parser;
 pub mod query;
-
-#[derive(Debug, Parser)]
-#[clap(name = "scdm", version)]
-pub struct App {
-    #[clap(flatten)]
-    global_opts: GlobalOpts,
-
-    #[clap(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Args)]
-struct GlobalOpts {
-    /// Verbosity level (can be specified multiple times)
-    #[clap(long, short = 'v', action)]
-    verbose: bool,
-
-    /// The DB_USER Env variable takes precedence
-    #[clap(long = "db-user", short = 'u')]
-    db_user: Option<String>,
-
-    /// The DB_PASSWORD Env variable takes precedence
-    #[clap(long = "db-password", short = 'p')]
-    db_password: Option<String>,
-
-    /// The DB_URL Env variable takes precedence
-    #[clap(long = "db-url")]
-    db_url: Option<String>,
-
-    /// The DB_PORT Env variable takes precedence
-    #[clap(long = "db-port")]
-    db_port: Option<String>,
-
-    /// The DB_NAME Env variable takes precedence
-    #[clap(long = "db-name", default_value = "scdm")]
-    db_name: Option<String>,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Parse the results of a crucible iteration and import into DB
-    Parse(ParseArgs),
-    /// Query the the CDM DB
-    Query(QueryArgs),
-}
-
-#[derive(Debug, Args)]
-struct ParseArgs {
-    path: String,
-}
-
-#[derive(Debug, Args)]
-struct QueryArgs {}
 
 #[derive(Error, Debug)]
 pub enum SCDMError {
@@ -70,6 +19,8 @@ pub enum SCDMError {
     InvalidDBInfo(String),
     #[error("Failed to create the necessary tables: {0}")]
     FailedTableInit(String),
+    #[error("Failed to parse timestamp: {0}")]
+    FailedTimestampParse(String),
 }
 
 pub async fn build_tables(pool: &PgPool) -> Result<()> {
@@ -102,7 +53,7 @@ pub async fn build_tables(pool: &PgPool) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = App::parse();
+    let args = args::App::parse();
 
     let db_user = env::var("DB_USER").or(args
         .global_opts
@@ -146,8 +97,9 @@ async fn main() -> Result<()> {
             let dir_path = Path::new(&args.path);
             parser::parse(&pool, dir_path).await
         }
-        Command::Query(_args) => {
-            todo!("Query not implemented yet");
+        Command::Query(args) => {
+            println!("{:?}", args);
+            Ok(())
         }
     };
 
