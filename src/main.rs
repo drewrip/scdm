@@ -67,7 +67,6 @@ async fn main() -> Result<()> {
         .global_opts
         .db_url
         .ok_or(SCDMError::MissingDBInfo(String::from("DB_URL"))))?;
-
     let db_port: u16 = env::var("DB_PORT")
         .unwrap_or(args.global_opts.db_port.unwrap_or(String::from("5432")))
         .parse::<u16>()
@@ -93,14 +92,11 @@ async fn main() -> Result<()> {
         .map_err(|e| SCDMError::FailedTableInit(format!("failure {}", e)))?;
 
     let result = match args.command {
-        Command::Parse(args) => {
-            let dir_path = Path::new(&args.path);
+        Command::Parse(parse_args) => {
+            let dir_path = Path::new(&parse_args.path);
             parser::parse(&pool, dir_path).await
         }
-        Command::Query(args) => {
-            println!("{:?}", args);
-            Ok(())
-        }
+        Command::Query(query_args) => query::query(&pool, query_args).await,
     };
 
     result

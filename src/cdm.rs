@@ -1,12 +1,9 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::prelude::FromRow;
+use strum_macros::Display;
+use tabled::Tabled;
+use tabled::derive::display;
 use uuid::Uuid;
-
-#[derive(Clone, Debug)]
-pub enum Class {
-    Count,
-    Throughput,
-}
 
 pub const SQL_TABLE_RUN: &str = r#"
     CREATE TABLE IF NOT EXISTS run (
@@ -21,7 +18,7 @@ pub const SQL_TABLE_RUN: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug, FromRow)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct Run {
     pub run_uuid: Uuid,
     pub begin: DateTime<Utc>,
@@ -29,7 +26,8 @@ pub struct Run {
     pub benchmark: String,
     pub email: String,
     pub name: String,
-    pub description: String,
+    #[tabled(display("display::option", "null"))]
+    pub description: Option<String>,
     pub source: String,
 }
 
@@ -42,7 +40,7 @@ pub const SQL_TABLE_TAG: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct Tag {
     pub run_uuid: Uuid,
     pub name: String,
@@ -61,14 +59,18 @@ pub const SQL_TABLE_ITERATION: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct Iteration {
     pub iteration_uuid: Uuid,
     pub run_uuid: Uuid,
     pub num: i64,
+    #[tabled(display("display::option", "null"))]
     pub status: Option<String>,
+    #[tabled(display("display::option", "null"))]
     pub path: Option<String>,
+    #[tabled(display("display::option", "null"))]
     pub primary_metric: Option<String>,
+    #[tabled(display("display::option", "null"))]
     pub primary_period: Option<String>,
 }
 
@@ -81,7 +83,7 @@ pub const SQL_TABLE_PARAM: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct Param {
     pub iteration_uuid: Uuid,
     pub arg: String,
@@ -98,12 +100,13 @@ pub const SQL_TABLE_SAMPLE: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct Sample {
     pub sample_uuid: Uuid,
     pub iteration_uuid: Uuid,
     pub num: i64,
     pub status: String,
+    #[tabled(display("display::option", "null"))]
     pub path: Option<String>,
 }
 
@@ -117,7 +120,7 @@ pub const SQL_TABLE_PERIOD: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct Period {
     pub period_uuid: Uuid,
     pub sample_uuid: Uuid,
@@ -138,15 +141,18 @@ pub const SQL_TABLE_METRIC_DESC: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct MetricDesc {
     pub metric_desc_uuid: Uuid,
-    pub period_uuid: Uuid,
-    pub class: Class,
+    #[tabled(display("display::option", "null"))]
+    pub period_uuid: Option<Uuid>,
+    pub class: String,
     pub metric_type: String,
     pub source: String,
-    pub names_list: Vec<String>,
-    pub names: Vec<(String, String)>,
+    #[tabled(display("display::option", "null"))]
+    pub names_list: Option<String>,
+    #[tabled(display("display::option", "null"))]
+    pub names: Option<String>,
 }
 
 pub const SQL_TABLE_METRIC_DATA: &str = r#"
@@ -161,12 +167,12 @@ pub const SQL_TABLE_METRIC_DATA: &str = r#"
     )
 "#;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow, Tabled)]
 pub struct MetricData {
     pub metric_data_id: i64,
     pub metric_desc_uuid: Uuid,
     pub begin: DateTime<Utc>,
     pub finish: DateTime<Utc>,
-    pub duration: TimeDelta,
+    pub duration: i64,
     pub value: f64,
 }
