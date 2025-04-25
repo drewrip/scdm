@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use uuid::Uuid;
 
 use crate::SCDMError;
@@ -77,6 +77,20 @@ pub enum QueryCommand {
 pub struct GetArgs {
     #[clap(subcommand)]
     pub resource: GetCommand,
+    #[clap(flatten)]
+    pub get_options: GetOptions,
+}
+
+#[derive(Debug, Args)]
+pub struct GetOptions {
+    #[clap(long = "output", short = 'o')]
+    pub output: Option<OutputFormat>,
+}
+
+#[derive(Debug, ValueEnum, Clone)]
+pub enum OutputFormat {
+    JSON,
+    CSV,
 }
 
 #[derive(Debug, Subcommand)]
@@ -112,12 +126,22 @@ pub struct GetRunArgs {
     /// Search for runs where "tag_name=tag_value"
     #[clap(long = "tag", short = 't')]
     pub tag: Option<String>,
+    /// Search for runs that begin before this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "begin", short = 'b', value_parser = parse_timestamp)]
-    pub begin: Option<DateTime<Utc>>,
+    #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
+    pub begin_before: Option<DateTime<Utc>>,
+    /// Search for runs that begin after this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "finish", short = 'f', value_parser = parse_timestamp)]
-    pub finish: Option<DateTime<Utc>>,
+    #[clap(long = "begin-after", value_parser = parse_timestamp)]
+    pub begin_after: Option<DateTime<Utc>>,
+    /// Search for runs that finish before this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
+    pub finish_before: Option<DateTime<Utc>>,
+    /// Search for runs that finish after this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-after", value_parser = parse_timestamp)]
+    pub finish_after: Option<DateTime<Utc>>,
     #[clap(long = "benchmark", short = 'k')]
     pub benchmark: Option<String>,
     #[clap(long = "email", short = 'e')]
@@ -155,6 +179,8 @@ pub struct GetParamArgs {
     pub iteration_uuid: Option<Uuid>,
     #[clap(long = "arg", short = 'a')]
     pub arg: Option<String>,
+    #[clap(long = "value", short = 'v')]
+    pub val: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -175,12 +201,22 @@ pub struct GetPeriodArgs {
     pub period_uuid: Option<Uuid>,
     #[clap(long = "sample-uuid", short = 's')]
     pub sample_uuid: Option<Uuid>,
+    /// Search for periods that begin before this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "begin", short = 'b', value_parser = parse_timestamp)]
-    pub begin: Option<DateTime<Utc>>,
+    #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
+    pub begin_before: Option<DateTime<Utc>>,
+    /// Search for runs that begin after this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "finish", short = 'f', value_parser = parse_timestamp)]
-    pub finish: Option<DateTime<Utc>>,
+    #[clap(long = "begin-after", value_parser = parse_timestamp)]
+    pub begin_after: Option<DateTime<Utc>>,
+    /// Search for runs that finish before this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
+    pub finish_before: Option<DateTime<Utc>>,
+    /// Search for runs that finish after this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-after", value_parser = parse_timestamp)]
+    pub finish_after: Option<DateTime<Utc>>,
     #[clap(long = "name", short = 'n')]
     pub name: Option<String>,
 }
@@ -201,14 +237,39 @@ pub struct GetMetricDescArgs {
 
 #[derive(Debug, Args)]
 pub struct GetMetricDataArgs {
-    #[clap(long = "metric-desc-uuid", short = 'u')]
+    #[clap(long = "run-uuid", short = 'r')]
+    pub run_uuid: Option<Uuid>,
+    #[clap(long = "iteration-uuid", short = 'i')]
+    pub iteration_uuid: Option<Uuid>,
+    #[clap(long = "metric-desc-uuid", short = 'm')]
     pub metric_desc_uuid: Option<Uuid>,
+    #[clap(long = "metric-type", short = 't')]
+    pub metric_type: Option<String>,
+    /// Search for periods that begin before this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "begin", short = 'b', value_parser = parse_timestamp)]
-    pub begin: Option<DateTime<Utc>>,
+    #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
+    pub begin_before: Option<DateTime<Utc>>,
+    /// Search for runs that begin after this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "finish", short = 'f', value_parser = parse_timestamp)]
-    pub finish: Option<DateTime<Utc>>,
+    #[clap(long = "begin-after", value_parser = parse_timestamp)]
+    pub begin_after: Option<DateTime<Utc>>,
+    /// Search for runs that finish before this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
+    pub finish_before: Option<DateTime<Utc>>,
+    /// Search for runs that finish after this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-after", value_parser = parse_timestamp)]
+    pub finish_after: Option<DateTime<Utc>>,
+    #[clap(long = "value-eq")]
+    /// Search for values equal to
+    pub value_eq: Option<f64>,
+    #[clap(long = "value-lt")]
+    /// Search for values less than
+    pub value_lt: Option<f64>,
+    /// Search for values greater than
+    #[clap(long = "value-gt")]
+    pub value_gt: Option<f64>,
 }
 
 #[derive(Debug, Args)]
@@ -221,14 +282,72 @@ pub struct DeleteArgs {
     pub resource: DeleteCommand,
 }
 
+/// For data integrity and safety, we provide no method of deleting
+/// iterations, params, samples, periods, or metric_data's.
+/// This should generally be unnecessary as the will automatically be
+/// removed when their parent resource is deleted.
 #[derive(Debug, Subcommand)]
 pub enum DeleteCommand {
-    Run(GetRunArgs),
-    Tag(GetTagArgs),
-    Iteration(GetIterationArgs),
-    Param(GetParamArgs),
-    Sample(GetSampleArgs),
-    Period(GetPeriodArgs),
-    MetricDesc(GetMetricDescArgs),
-    MetricData(GetMetricDataArgs),
+    Run(DeleteRunArgs),
+    Tag(DeleteTagArgs),
+    MetricDesc(DeleteMetricDescArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DeleteRunArgs {
+    #[clap(long = "run-uuid", short = 'u')]
+    pub run_uuid: Option<Uuid>,
+    /// Delete for runs where "tag_name=tag_value"
+    #[clap(long = "tag", short = 't')]
+    pub tag: Option<String>,
+    /// Delete for runs that begin before this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
+    pub begin_before: Option<DateTime<Utc>>,
+    /// Delete for runs that begin after this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "begin-after", value_parser = parse_timestamp)]
+    pub begin_after: Option<DateTime<Utc>>,
+    /// Delete for runs that finish before this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
+    pub finish_before: Option<DateTime<Utc>>,
+    /// Delete for runs that finish after this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-after", value_parser = parse_timestamp)]
+    pub finish_after: Option<DateTime<Utc>>,
+    #[clap(long = "benchmark", short = 'k')]
+    pub benchmark: Option<String>,
+    #[clap(long = "email", short = 'e')]
+    pub email: Option<String>,
+    #[clap(long = "name", short = 'n')]
+    pub name: Option<String>,
+    #[clap(long = "source", short = 's')]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DeleteTagArgs {
+    #[clap(long = "run-uuid", short = 'r')]
+    pub run_uuid: Option<Uuid>,
+    /// Delete for tags where "tag_name=tag_value"
+    #[clap(long = "tag", short = 't')]
+    pub tag: Option<String>,
+}
+
+/// Important note: No period_uuid option is provided as only
+/// metric_desc's with a null period_uuid will be considered for deletion.
+/// These are a special case of metrics and data that were not bound to a
+/// parent period. All other metric_descs, those that DO have parent specified,
+/// should generally only be removed by deleting the whole run.
+#[derive(Debug, Args)]
+pub struct DeleteMetricDescArgs {
+    #[clap(long = "metric-desc-uuid", short = 'u')]
+    pub metric_desc_uuid: Option<Uuid>,
+    #[clap(long = "class", short = 'c')]
+    pub class: Option<String>,
+    #[clap(long = "metric-type", short = 't')]
+    pub metric_type: Option<String>,
+    #[clap(long = "source", short = 's')]
+    pub source: Option<String>,
 }
