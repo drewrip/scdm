@@ -8,9 +8,9 @@ a normalized relational model.
 SCDM provides two commands:
 
 1. `scdm parse`: a parser that builds out the SCDM tables and imports the data. **NOTE:** this parses the `*.ndjson` files that
-are generated from `rickshaw-gen-docs`, which are not generated for all Crucible as of now.
+are generated from `rickshaw-gen-docs`, which are not generated for all Crucible versions as of now.
 
-2. `scdm query`: a simple query interface to query the PostgreSQL DB (WIP).
+2. `scdm query`: a simple query interface to query the PostgreSQL DB.
 
 ## Relational Model
 

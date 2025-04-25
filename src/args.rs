@@ -5,6 +5,8 @@ use uuid::Uuid;
 
 use crate::SCDMError;
 
+/// SCDM: Structured Common Data Model -
+/// A tool to index and query performance metrics that come from Crucible runs.
 #[derive(Debug, Parser)]
 #[clap(name = "scdm", version)]
 pub struct App {
@@ -17,10 +19,6 @@ pub struct App {
 
 #[derive(Debug, Args)]
 pub struct GlobalOpts {
-    /// Verbosity level
-    #[clap(long, short = 'v', action)]
-    pub verbose: bool,
-
     /// The DB_USER Env variable takes precedence
     #[clap(long = "db-user", short = 'u')]
     pub db_user: Option<String>,
