@@ -323,7 +323,7 @@ fn parse_body(index_type: IndexType, body_jsonl: String) -> Result<BodyJson> {
     })
 }
 
-async fn insert_runs(txn: &mut Transaction<'_, Postgres>, runs: &Vec<&RunJson>) -> Result<u64> {
+pub async fn insert_runs(txn: &mut Transaction<'_, Postgres>, runs: &Vec<&RunJson>) -> Result<u64> {
     if runs.is_empty() {
         return Ok(0);
     }
@@ -351,7 +351,7 @@ async fn insert_runs(txn: &mut Transaction<'_, Postgres>, runs: &Vec<&RunJson>) 
     Ok(res.rows_affected())
 }
 
-async fn insert_tags(txn: &mut Transaction<'_, Postgres>, tags: &Vec<&TagJson>) -> Result<u64> {
+pub async fn insert_tags(txn: &mut Transaction<'_, Postgres>, tags: &Vec<&TagJson>) -> Result<u64> {
     if tags.is_empty() {
         return Ok(0);
     }
@@ -374,7 +374,7 @@ async fn insert_tags(txn: &mut Transaction<'_, Postgres>, tags: &Vec<&TagJson>) 
     Ok(res.rows_affected())
 }
 
-async fn insert_iterations(
+pub async fn insert_iterations(
     txn: &mut Transaction<'_, Postgres>,
     iterations: &Vec<&IterationJson>,
 ) -> Result<u64> {
@@ -404,7 +404,7 @@ async fn insert_iterations(
     Ok(res.rows_affected())
 }
 
-async fn insert_params(
+pub async fn insert_params(
     txn: &mut Transaction<'_, Postgres>,
     params: &Vec<&ParamJson>,
 ) -> Result<u64> {
@@ -430,7 +430,7 @@ async fn insert_params(
     Ok(res.rows_affected())
 }
 
-async fn insert_samples(
+pub async fn insert_samples(
     txn: &mut Transaction<'_, Postgres>,
     samples: &Vec<&SampleJson>,
 ) -> Result<u64> {
@@ -458,7 +458,7 @@ async fn insert_samples(
     Ok(res.rows_affected())
 }
 
-async fn insert_periods(
+pub async fn insert_periods(
     txn: &mut Transaction<'_, Postgres>,
     periods: &Vec<&PeriodJson>,
 ) -> Result<u64> {
@@ -486,7 +486,7 @@ async fn insert_periods(
     Ok(res.rows_affected())
 }
 
-async fn insert_metric_descs(
+pub async fn insert_metric_descs(
     txn: &mut Transaction<'_, Postgres>,
     metric_descs: &Vec<&MetricDescJson>,
 ) -> Result<u64> {
@@ -494,54 +494,61 @@ async fn insert_metric_descs(
         return Ok(0);
     }
 
-    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO metric_desc
+    let mut rows_affected = 0;
+    for group in metric_descs.chunks(1024) {
+        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO metric_desc
         (metric_desc_uuid, period_uuid, class, metric_type, source, names_list, names) ",
-    );
-    qb.push_values(metric_descs, |mut b, metric_desc| {
-        b.push_bind(metric_desc.metric_desc.metric_desc_uuid)
-            .push_bind(metric_desc.period.clone().map(|p| p.period_uuid))
-            .push_bind(&metric_desc.metric_desc.class)
-            .push_bind(&metric_desc.metric_desc.metric_type)
-            .push_bind(&metric_desc.metric_desc.source)
-            .push_bind(&metric_desc.metric_desc.names_list)
-            .push_bind(serde_json::to_string(&metric_desc.metric_desc.names).ok());
-    });
-    let query = qb.build();
-    let s = query.sql();
-    let res = query
-        .execute(&mut **txn)
-        .await
-        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
-    Ok(res.rows_affected())
+        );
+        qb.push_values(group, |mut b, metric_desc| {
+            b.push_bind(metric_desc.metric_desc.metric_desc_uuid)
+                .push_bind(metric_desc.period.clone().map(|p| p.period_uuid))
+                .push_bind(&metric_desc.metric_desc.class)
+                .push_bind(&metric_desc.metric_desc.metric_type)
+                .push_bind(&metric_desc.metric_desc.source)
+                .push_bind(&metric_desc.metric_desc.names_list)
+                .push_bind(serde_json::to_string(&metric_desc.metric_desc.names).ok());
+        });
+        let query = qb.build();
+        let s = query.sql();
+        let res = query
+            .execute(&mut **txn)
+            .await
+            .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+        rows_affected += res.rows_affected();
+    }
+    Ok(rows_affected)
 }
 
-async fn insert_metric_datas(
+pub async fn insert_metric_datas(
     txn: &mut Transaction<'_, Postgres>,
     metric_datas: &Vec<&MetricDataJson>,
 ) -> Result<u64> {
     if metric_datas.is_empty() {
         return Ok(0);
     }
-
-    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO metric_data
+    let mut rows_affected = 0;
+    for group in metric_datas.chunks(1024) {
+        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO metric_data
         (metric_desc_uuid, value, begin, finish, duration) ",
-    );
-    qb.push_values(metric_datas, |mut b, metric_data| {
-        b.push_bind(metric_data.metric_desc.metric_desc_uuid)
-            .push_bind(metric_data.metric_data.value)
-            .push_bind(metric_data.metric_data.begin)
-            .push_bind(metric_data.metric_data.end)
-            .push_bind(metric_data.metric_data.duration);
-    });
-    let query = qb.build();
-    let s = query.sql();
-    let res = query
-        .execute(&mut **txn)
-        .await
-        .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
-    Ok(res.rows_affected())
+        );
+        qb.push_values(group, |mut b, metric_data| {
+            b.push_bind(metric_data.metric_desc.metric_desc_uuid)
+                .push_bind(metric_data.metric_data.value)
+                .push_bind(metric_data.metric_data.begin)
+                .push_bind(metric_data.metric_data.end)
+                .push_bind(metric_data.metric_data.duration);
+        });
+        let query = qb.build();
+        let s = query.sql();
+        let res = query
+            .execute(&mut **txn)
+            .await
+            .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+        rows_affected += res.rows_affected();
+    }
+    Ok(rows_affected)
 }
 
 async fn insert_records(
@@ -629,9 +636,9 @@ pub async fn parse(pool: &PgPool, dir_path: &Path) -> Result<()> {
 
     let total_records = insert_records(&mut txn, &records).await?;
 
-    println!("added {} rows", total_records);
-
     txn.commit().await?;
+
+    println!("added {} rows", total_records);
 
     Ok(())
 }

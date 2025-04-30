@@ -8,6 +8,7 @@ use thiserror::Error;
 
 pub mod args;
 pub mod cdm;
+pub mod import;
 pub mod parser;
 pub mod query;
 
@@ -97,6 +98,7 @@ async fn main() -> Result<()> {
             parser::parse(&pool, dir_path).await
         }
         Command::Query(query_args) => query::query(&pool, query_args).await,
+        Command::Import(import_args) => import::import(&pool, import_args).await,
     };
 
     result

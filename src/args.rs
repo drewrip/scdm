@@ -46,6 +46,18 @@ pub enum Command {
     Parse(ParseArgs),
     /// Query the the CDM DB
     Query(QueryArgs),
+    /// Import run from OpenSearch CDM DB
+    Import(ImportArgs),
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+pub struct ImportArgs {
+    /// If no run_uuid is specified, all runs will be imported
+    #[clap(long = "run-uuid")]
+    pub run_uuid: Option<Uuid>,
+    #[clap(long = "all", action)]
+    pub all: bool,
 }
 
 #[derive(Debug, Args)]
@@ -203,15 +215,15 @@ pub struct GetPeriodArgs {
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
     pub begin_before: Option<DateTime<Utc>>,
-    /// Search for runs that begin after this time.
+    /// Search for periods that begin after this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "begin-after", value_parser = parse_timestamp)]
     pub begin_after: Option<DateTime<Utc>>,
-    /// Search for runs that finish before this time.
+    /// Search for periods that finish before this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
     pub finish_before: Option<DateTime<Utc>>,
-    /// Search for runs that finish after this time.
+    /// Search for periods that finish after this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "finish-after", value_parser = parse_timestamp)]
     pub finish_after: Option<DateTime<Utc>>,
@@ -243,19 +255,19 @@ pub struct GetMetricDataArgs {
     pub metric_desc_uuid: Option<Uuid>,
     #[clap(long = "metric-type", short = 't')]
     pub metric_type: Option<String>,
-    /// Search for periods that begin before this time.
+    /// Search for data that begins before this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
     pub begin_before: Option<DateTime<Utc>>,
-    /// Search for runs that begin after this time.
+    /// Search for data that begins after this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "begin-after", value_parser = parse_timestamp)]
     pub begin_after: Option<DateTime<Utc>>,
-    /// Search for runs that finish before this time.
+    /// Search for data that finishes before this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
     pub finish_before: Option<DateTime<Utc>>,
-    /// Search for runs that finish after this time.
+    /// Search for data that finishes after this time.
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "finish-after", value_parser = parse_timestamp)]
     pub finish_after: Option<DateTime<Utc>>,
