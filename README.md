@@ -5,12 +5,14 @@ This is an extension of the [CDM](https://github.com/perftool-incubator/CommonDa
 attempts to use as many of the prior concepts and structures as possible, while providing
 a normalized relational model.
 
-SCDM provides two commands:
+SCDM provides a few commands:
 
 1. `scdm parse`: a parser that builds out the SCDM tables and imports the data. **NOTE:** this parses the `*.ndjson` files that
 are generated from `rickshaw-gen-docs`, which are not generated for all Crucible versions as of now.
 
 2. `scdm query`: a simple query interface to query the PostgreSQL DB.
+
+3. `scdm import`: import one or all of the runs from an OpenSearch database running on `localhost:9200`
 
 ## Relational Model
 

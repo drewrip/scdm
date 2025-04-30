@@ -53,7 +53,6 @@ pub enum Command {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub struct ImportArgs {
-    /// If no run_uuid is specified, all runs will be imported
     #[clap(long = "run-uuid")]
     pub run_uuid: Option<Uuid>,
     #[clap(long = "all", action)]
