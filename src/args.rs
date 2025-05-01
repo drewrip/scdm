@@ -284,7 +284,7 @@ pub struct GetMetricDataArgs {
 
 #[derive(Debug, Args)]
 pub struct GetNameArgs {
-    #[clap(long = "iteration_uuid", short = 'm')]
+    #[clap(long = "iteration_uuid", short = 'i')]
     pub metric_desc_uuid: Option<Uuid>,
     #[clap(long = "name", short = 'n')]
     pub name: Option<String>,
