@@ -1,7 +1,7 @@
 use crate::args::{
-    DeleteCommand, DeleteMetricDescArgs, DeleteRunArgs, DeleteTagArgs, GetCommand,
-    GetIterationArgs, GetMetricDataArgs, GetMetricDescArgs, GetParamArgs, GetPeriodArgs,
-    GetRunArgs, GetSampleArgs, GetTagArgs, OutputFormat, QueryArgs, QueryCommand,
+    DeleteCommand, DeleteRunArgs, DeleteTagArgs, GetCommand, GetIterationArgs, GetMetricDataArgs,
+    GetMetricDescArgs, GetParamArgs, GetPeriodArgs, GetRunArgs, GetSampleArgs, GetTagArgs,
+    OutputFormat, QueryArgs, QueryCommand,
 };
 use crate::cdm::*;
 use anyhow::Result;
@@ -445,32 +445,6 @@ impl QueryDelete for DeleteTagArgs {
     }
 }
 
-impl QueryDelete for DeleteMetricDescArgs {
-    async fn query_delete(&self, pool: &PgPool) -> Result<u64, QueryError> {
-        let raw_query: &str = r#"
-            DELETE FROM metric_desc
-            WHERE
-                ($1 IS NULL OR metric_desc_uuid = $1) AND
-                (period_uuid IS NULL) AND
-                ($2 IS NULL OR class = $2) AND
-                ($3 IS NULL OR metric_type = $3) AND
-                ($4 IS NULL OR source = $4)
-            "#;
-
-        let query = sqlx::query(raw_query)
-            .bind(self.metric_desc_uuid)
-            .bind(self.class.clone())
-            .bind(self.metric_type.clone())
-            .bind(self.source.clone());
-
-        let results = query
-            .execute(pool)
-            .await
-            .map_err(|e| QueryError::DeleteError(format!("{}", e)))?;
-        Ok(results.rows_affected())
-    }
-}
-
 pub async fn query_delete<U: QueryDelete>(pool: &PgPool, resource: U) -> Result<()> {
     let num_deletes = resource.query_delete(pool).await?;
     println!("deleted {} rows", num_deletes);
@@ -492,7 +466,6 @@ pub async fn query(pool: &PgPool, args: QueryArgs) -> Result<()> {
         QueryCommand::Delete(del) => match del.resource {
             DeleteCommand::Run(args) => query_delete(pool, args).await,
             DeleteCommand::Tag(args) => query_delete(pool, args).await,
-            DeleteCommand::MetricDesc(args) => query_delete(pool, args).await,
         },
     }
 }

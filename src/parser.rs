@@ -27,6 +27,15 @@ pub enum ParseError {
     InsertFailed(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct GlobalResource {
+    pub iteration: IterationJson,
+    pub sample: SampleJson,
+    pub period: PeriodJson,
+    pub metric_desc: MetricDescJson,
+    pub metric_data: MetricDataJson,
+}
+
 fn date_time_utc_from_str<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
 where
     D: Deserializer<'de>,
@@ -71,6 +80,10 @@ fn index_name_to_type(name: String) -> Option<IndexType> {
     }
 }
 
+pub trait Global {
+    fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IndexJson {
     pub index: IndexSpecJson,
@@ -112,6 +125,27 @@ pub struct IterationFKJson {
     pub iteration_uuid: Uuid,
 }
 
+impl Global for IterationJson {
+    fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
+        IterationJson {
+            cdm: CDMSpecJson {
+                ver: "v9dev".to_string(),
+            },
+            iteration: IterationSpecJson {
+                iteration_uuid: my_uuid,
+                num: 0,
+                primary_metric: "global".to_string(),
+                primary_period: "global".to_string(),
+                status: "pass".to_string(),
+                path: None,
+            },
+            run: RunFKJson {
+                run_uuid: parent_uuid,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MetricDataJson {
     pub cdm: CDMSpecJson,
@@ -141,6 +175,28 @@ pub struct MetricDescJson {
     pub sample: Option<SampleFKJson>,
 }
 
+impl Global for MetricDataJson {
+    fn global(parent_uuid: Uuid, _my_uuid: Uuid) -> Self {
+        MetricDataJson {
+            cdm: CDMSpecJson {
+                ver: "v9dev".to_string(),
+            },
+            metric_data: MetricDataSpecJson {
+                begin: DateTime::<Utc>::from_timestamp_nanos(0),
+                end: DateTime::<Utc>::from_timestamp_nanos(0),
+                duration: 0,
+                value: 0.0,
+            },
+            metric_desc: MetricDescFKJson {
+                metric_desc_uuid: parent_uuid,
+            },
+            run: RunFKJson {
+                run_uuid: Uuid::nil(),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MetricDescSpecJson {
     #[serde(rename = "metric_desc-uuid")]
@@ -158,6 +214,32 @@ pub struct MetricDescSpecJson {
 pub struct MetricDescFKJson {
     #[serde(rename = "metric_desc-uuid")]
     pub metric_desc_uuid: Uuid,
+}
+
+impl Global for MetricDescJson {
+    fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
+        MetricDescJson {
+            cdm: CDMSpecJson {
+                ver: "v9dev".to_string(),
+            },
+            metric_desc: MetricDescSpecJson {
+                metric_desc_uuid: my_uuid,
+                class: "count".to_string(),
+                names: HashMap::new(),
+                names_list: Vec::new(),
+                source: "global".to_string(),
+                metric_type: "global".to_string(),
+            },
+            iteration: None,
+            period: Some(PeriodFKJson {
+                period_uuid: parent_uuid,
+            }),
+            run: RunFKJson {
+                run_uuid: Uuid::nil(),
+            },
+            sample: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -198,6 +280,31 @@ pub struct PeriodSpecJson {
 pub struct PeriodFKJson {
     #[serde(rename = "period-uuid")]
     pub period_uuid: Uuid,
+}
+
+impl Global for PeriodJson {
+    fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
+        PeriodJson {
+            cdm: CDMSpecJson {
+                ver: "v9dev".to_string(),
+            },
+            period: PeriodSpecJson {
+                period_uuid: my_uuid,
+                begin: DateTime::<Utc>::from_timestamp_nanos(0),
+                end: DateTime::<Utc>::from_timestamp_nanos(0),
+                name: "global".to_string(),
+            },
+            iteration: IterationFKJson {
+                iteration_uuid: Uuid::nil(),
+            },
+            run: RunFKJson {
+                run_uuid: Uuid::nil(),
+            },
+            sample: SampleFKJson {
+                sample_uuid: parent_uuid,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -249,6 +356,28 @@ pub struct SampleSpecJson {
 pub struct SampleFKJson {
     #[serde(rename = "sample-uuid")]
     pub sample_uuid: Uuid,
+}
+
+impl Global for SampleJson {
+    fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
+        SampleJson {
+            cdm: CDMSpecJson {
+                ver: "v9dev".to_string(),
+            },
+            sample: SampleSpecJson {
+                sample_uuid: my_uuid,
+                path: None,
+                status: "pass".to_string(),
+                num: 0,
+            },
+            iteration: IterationFKJson {
+                iteration_uuid: parent_uuid,
+            },
+            run: RunFKJson {
+                run_uuid: Uuid::nil(), // Doesn't matter for our processing, not the direct parent
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -323,9 +452,32 @@ fn parse_body(index_type: IndexType, body_jsonl: String) -> Result<BodyJson> {
     })
 }
 
-pub async fn insert_runs(txn: &mut Transaction<'_, Postgres>, runs: &Vec<&RunJson>) -> Result<u64> {
+pub async fn insert_runs(
+    txn: &mut Transaction<'_, Postgres>,
+    globals: &mut HashMap<Uuid, GlobalResource>,
+    runs: &Vec<&RunJson>,
+) -> Result<(
+    u64,
+    Vec<IterationJson>,
+    Vec<SampleJson>,
+    Vec<PeriodJson>,
+    Vec<MetricDescJson>,
+    Vec<MetricDataJson>,
+)> {
+    let mut global_iterations = Vec::new();
+    let mut global_samples = Vec::new();
+    let mut global_periods = Vec::new();
+    let mut global_metric_descs = Vec::new();
+    let mut global_metric_datas = Vec::new();
     if runs.is_empty() {
-        return Ok(0);
+        return Ok((
+            0,
+            global_iterations,
+            global_samples,
+            global_periods,
+            global_metric_descs,
+            global_metric_datas,
+        ));
     }
 
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
@@ -333,6 +485,28 @@ pub async fn insert_runs(txn: &mut Transaction<'_, Postgres>, runs: &Vec<&RunJso
         (run_uuid, begin, finish, benchmark, email, name, description, source) ",
     );
     qb.push_values(runs, |mut b, run| {
+        let iteration_uuid = Uuid::new_v4();
+        let global_iteration = IterationJson::global(run.run.run_uuid, iteration_uuid);
+        let sample_uuid = Uuid::new_v4();
+        let global_sample = SampleJson::global(iteration_uuid, sample_uuid);
+        let period_uuid = Uuid::new_v4();
+        let global_period = PeriodJson::global(sample_uuid, period_uuid);
+        let metric_desc_uuid = Uuid::new_v4();
+        let global_metric_desc = MetricDescJson::global(period_uuid, metric_desc_uuid);
+        let global_metric_data = MetricDataJson::global(metric_desc_uuid, Uuid::nil());
+        global_iterations.push(global_iteration.clone());
+        global_samples.push(global_sample.clone());
+        global_periods.push(global_period.clone());
+        global_metric_descs.push(global_metric_desc.clone());
+        global_metric_datas.push(global_metric_data.clone());
+        let global_resource = GlobalResource {
+            iteration: global_iteration,
+            sample: global_sample,
+            period: global_period,
+            metric_desc: global_metric_desc,
+            metric_data: global_metric_data,
+        };
+        globals.insert(run.run.run_uuid, global_resource);
         b.push_bind(run.run.run_uuid)
             .push_bind(run.run.begin)
             .push_bind(run.run.end)
@@ -348,7 +522,14 @@ pub async fn insert_runs(txn: &mut Transaction<'_, Postgres>, runs: &Vec<&RunJso
         .execute(&mut **txn)
         .await
         .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
-    Ok(res.rows_affected())
+    Ok((
+        res.rows_affected(),
+        global_iterations,
+        global_samples,
+        global_periods,
+        global_metric_descs,
+        global_metric_datas,
+    ))
 }
 
 pub async fn insert_tags(txn: &mut Transaction<'_, Postgres>, tags: &Vec<&TagJson>) -> Result<u64> {
@@ -488,6 +669,7 @@ pub async fn insert_periods(
 
 pub async fn insert_metric_descs(
     txn: &mut Transaction<'_, Postgres>,
+    globals: &HashMap<Uuid, GlobalResource>,
     metric_descs: &Vec<&MetricDescJson>,
 ) -> Result<u64> {
     if metric_descs.is_empty() {
@@ -502,7 +684,17 @@ pub async fn insert_metric_descs(
         );
         qb.push_values(group, |mut b, metric_desc| {
             b.push_bind(metric_desc.metric_desc.metric_desc_uuid)
-                .push_bind(metric_desc.period.clone().map(|p| p.period_uuid))
+                .push_bind(
+                    metric_desc
+                        .period
+                        .clone()
+                        .map(|p| p.period_uuid)
+                        .or_else(|| {
+                            globals
+                                .get(&metric_desc.run.run_uuid)
+                                .map(|r| r.period.period.period_uuid)
+                        }),
+                )
                 .push_bind(&metric_desc.metric_desc.class)
                 .push_bind(&metric_desc.metric_desc.metric_type)
                 .push_bind(&metric_desc.metric_desc.source)
@@ -578,13 +770,30 @@ async fn insert_records(
         };
     }
 
-    num_new += insert_runs(txn, &runs).await?;
+    // Default resources for data that is scoped to the run
+    let mut globals: HashMap<Uuid, GlobalResource> = HashMap::new();
+
+    let (
+        new_run_rows,
+        global_iterations,
+        global_samples,
+        global_periods,
+        global_metric_descs,
+        global_metric_datas,
+    ) = insert_runs(txn, &mut globals, &runs).await?;
+    iterations.append(&mut global_iterations.iter().collect());
+    samples.append(&mut global_samples.iter().collect());
+    periods.append(&mut global_periods.iter().collect());
+    metric_descs.append(&mut global_metric_descs.iter().collect());
+    metric_datas.append(&mut global_metric_datas.iter().collect());
+    num_new += new_run_rows;
+
     num_new += insert_tags(txn, &tags).await?;
     num_new += insert_iterations(txn, &iterations).await?;
     num_new += insert_params(txn, &params).await?;
     num_new += insert_samples(txn, &samples).await?;
     num_new += insert_periods(txn, &periods).await?;
-    num_new += insert_metric_descs(txn, &metric_descs).await?;
+    num_new += insert_metric_descs(txn, &globals, &metric_descs).await?;
     num_new += insert_metric_datas(txn, &metric_datas).await?;
     Ok(num_new)
 }

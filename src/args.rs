@@ -299,7 +299,6 @@ pub struct DeleteArgs {
 pub enum DeleteCommand {
     Run(DeleteRunArgs),
     Tag(DeleteTagArgs),
-    MetricDesc(DeleteMetricDescArgs),
 }
 
 #[derive(Debug, Args)]
@@ -342,21 +341,4 @@ pub struct DeleteTagArgs {
     /// Delete for tags where "tag_name=tag_value"
     #[clap(long = "tag", short = 't')]
     pub tag: Option<String>,
-}
-
-/// Important note: No period_uuid option is provided as only
-/// metric_desc's with a null period_uuid will be considered for deletion.
-/// These are a special case of metrics and data that were not bound to a
-/// parent period. All other metric_descs, those that DO have parent specified,
-/// should generally only be removed by deleting the whole run.
-#[derive(Debug, Args)]
-pub struct DeleteMetricDescArgs {
-    #[clap(long = "metric-desc-uuid", short = 'u')]
-    pub metric_desc_uuid: Option<Uuid>,
-    #[clap(long = "class", short = 'c')]
-    pub class: Option<String>,
-    #[clap(long = "metric-type", short = 't')]
-    pub metric_type: Option<String>,
-    #[clap(long = "source", short = 's')]
-    pub source: Option<String>,
 }
