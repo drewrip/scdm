@@ -112,6 +112,7 @@ pub enum GetCommand {
     Period(GetPeriodArgs),
     MetricDesc(GetMetricDescArgs),
     MetricData(GetMetricDataArgs),
+    Name(GetNameArgs),
 }
 
 fn parse_timestamp(arg: &str) -> Result<DateTime<Utc>, SCDMError> {
@@ -279,6 +280,16 @@ pub struct GetMetricDataArgs {
     /// Search for values greater than
     #[clap(long = "value-gt")]
     pub value_gt: Option<f64>,
+}
+
+#[derive(Debug, Args)]
+pub struct GetNameArgs {
+    #[clap(long = "iteration_uuid", short = 'm')]
+    pub metric_desc_uuid: Option<Uuid>,
+    #[clap(long = "name", short = 'n')]
+    pub name: Option<String>,
+    #[clap(long = "value", short = 'v')]
+    pub val: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -44,6 +44,7 @@ pub async fn build_tables(pool: &PgPool) -> Result<()> {
     sqlx::query(cdm::SQL_TABLE_METRIC_DESC)
         .execute(&mut *txn)
         .await?;
+    sqlx::query(cdm::SQL_TABLE_NAME).execute(&mut *txn).await?;
     sqlx::query(cdm::SQL_TABLE_METRIC_DATA)
         .execute(&mut *txn)
         .await?;

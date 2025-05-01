@@ -1,7 +1,7 @@
 use crate::args::{
     DeleteCommand, DeleteRunArgs, DeleteTagArgs, GetCommand, GetIterationArgs, GetMetricDataArgs,
-    GetMetricDescArgs, GetParamArgs, GetPeriodArgs, GetRunArgs, GetSampleArgs, GetTagArgs,
-    OutputFormat, QueryArgs, QueryCommand,
+    GetMetricDescArgs, GetNameArgs, GetParamArgs, GetPeriodArgs, GetRunArgs, GetSampleArgs,
+    GetTagArgs, OutputFormat, QueryArgs, QueryCommand,
 };
 use crate::cdm::*;
 use anyhow::Result;
@@ -275,6 +275,27 @@ impl QueryGet<MetricDesc> for GetMetricDescArgs {
     }
 }
 
+impl QueryGet<Name> for GetNameArgs {
+    async fn query_get(&self, pool: &PgPool) -> Result<Vec<Name>, QueryError> {
+        let raw_query: &str = r#"
+            SELECT name.* FROM name
+            WHERE
+                ($1 IS NULL OR metric_desc_uuid = $1) AND
+                ($2 IS NULL OR name = $2) AND
+                ($3 IS NULL OR val = $3)
+            "#;
+
+        let query = sqlx::query_as(raw_query)
+            .bind(self.metric_desc_uuid)
+            .bind(self.name.clone())
+            .bind(self.val.clone());
+        Ok(query
+            .fetch_all(pool)
+            .await
+            .map_err(|e| QueryError::GetError(format!("{}", e)))?)
+    }
+}
+
 #[derive(Clone, Debug, FromRow, Tabled, Serialize)]
 pub struct Data {
     #[tabled(display("display::option", "null"))]
@@ -462,6 +483,7 @@ pub async fn query(pool: &PgPool, args: QueryArgs) -> Result<()> {
             GetCommand::Period(args) => query_get(pool, args, get.get_options.output).await,
             GetCommand::MetricDesc(args) => query_get(pool, args, get.get_options.output).await,
             GetCommand::MetricData(args) => query_get(pool, args, get.get_options.output).await,
+            GetCommand::Name(args) => query_get(pool, args, get.get_options.output).await,
         },
         QueryCommand::Delete(del) => match del.resource {
             DeleteCommand::Run(args) => query_delete(pool, args).await,

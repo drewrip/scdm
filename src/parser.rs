@@ -13,6 +13,8 @@ use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::cdm::Name;
+
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("Couldn't find path, or it isn't a directory: {0}")]
@@ -712,6 +714,33 @@ pub async fn insert_metric_descs(
     Ok(rows_affected)
 }
 
+pub async fn insert_names(txn: &mut Transaction<'_, Postgres>, names: &Vec<&Name>) -> Result<u64> {
+    if names.is_empty() {
+        return Ok(0);
+    }
+
+    let mut rows_affected = 0;
+    for group in names.chunks(1024) {
+        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO name
+        (metric_desc_uuid, name, val) ",
+        );
+        qb.push_values(group, |mut b, name| {
+            b.push_bind(name.metric_desc_uuid)
+                .push_bind(&name.name)
+                .push_bind(&name.val);
+        });
+        let query = qb.build();
+        let s = query.sql();
+        let res = query
+            .execute(&mut **txn)
+            .await
+            .map_err(|e| ParseError::InsertFailed(format!("{} ({})", e.to_string(), s)))?;
+        rows_affected += res.rows_affected();
+    }
+    Ok(rows_affected)
+}
+
 pub async fn insert_metric_datas(
     txn: &mut Transaction<'_, Postgres>,
     metric_datas: &Vec<&MetricDataJson>,
@@ -743,6 +772,22 @@ pub async fn insert_metric_datas(
     Ok(rows_affected)
 }
 
+pub fn extract_names(metric_desc: &MetricDescJson) -> Vec<Name> {
+    metric_desc
+        .metric_desc
+        .names
+        .iter()
+        .filter_map(|md| match md.1.as_str() {
+            Some(val) => Some(Name {
+                metric_desc_uuid: metric_desc.metric_desc.metric_desc_uuid,
+                name: md.0.to_string(),
+                val: val.to_string(),
+            }),
+            None => None,
+        })
+        .collect()
+}
+
 async fn insert_records(
     txn: &mut Transaction<'_, Postgres>,
     records: &Vec<BodyJson>,
@@ -770,6 +815,13 @@ async fn insert_records(
         };
     }
 
+    let names: Vec<Name> = metric_descs
+        .clone()
+        .into_iter()
+        .map(extract_names)
+        .flatten()
+        .collect();
+
     // Default resources for data that is scoped to the run
     let mut globals: HashMap<Uuid, GlobalResource> = HashMap::new();
 
@@ -794,6 +846,7 @@ async fn insert_records(
     num_new += insert_samples(txn, &samples).await?;
     num_new += insert_periods(txn, &periods).await?;
     num_new += insert_metric_descs(txn, &globals, &metric_descs).await?;
+    num_new += insert_names(txn, &names.iter().collect()).await?;
     num_new += insert_metric_datas(txn, &metric_datas).await?;
     Ok(num_new)
 }

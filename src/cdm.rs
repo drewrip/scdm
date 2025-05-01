@@ -149,10 +149,6 @@ pub struct MetricDesc {
     pub class: String,
     pub metric_type: String,
     pub source: String,
-    #[tabled(display("display::option", "null"))]
-    pub names_list: Option<String>,
-    #[tabled(display("display::option", "null"))]
-    pub names: Option<String>,
 }
 
 pub const SQL_TABLE_METRIC_DATA: &str = r#"
@@ -164,6 +160,22 @@ pub const SQL_TABLE_METRIC_DATA: &str = r#"
         finish timestamptz NOT NULL,
         duration bigint NOT NULL,
         PRIMARY KEY (metric_data_id, metric_desc_uuid)
+    )
+"#;
+
+#[derive(Clone, Debug, FromRow, Tabled, Serialize)]
+pub struct Name {
+    pub metric_desc_uuid: Uuid,
+    pub name: String,
+    pub val: String,
+}
+
+pub const SQL_TABLE_NAME: &str = r#"
+    CREATE TABLE IF NOT EXISTS name (
+        metric_desc_uuid uuid REFERENCES metric_desc ON DELETE CASCADE,
+        name text NOT NULL,
+        val text NOT NULL,
+        PRIMARY KEY (metric_desc_uuid, name)
     )
 "#;
 
