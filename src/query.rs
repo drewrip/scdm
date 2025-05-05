@@ -1,19 +1,24 @@
 use crate::args::{
-    DeleteCommand, DeleteRunArgs, DeleteTagArgs, GetCommand, GetIterationArgs, GetMetricDataArgs,
-    GetMetricDescArgs, GetNameArgs, GetParamArgs, GetPeriodArgs, GetRunArgs, GetSampleArgs,
-    GetTagArgs, OutputFormat, QueryArgs, QueryCommand,
+    Aggregator, DeleteCommand, DeleteRunArgs, DeleteTagArgs, GetCommand, GetIterationArgs,
+    GetMetricDataArgs, GetMetricDescArgs, GetNameArgs, GetParamArgs, GetPeriodArgs, GetRunArgs,
+    GetSampleArgs, GetTagArgs, MetricArgs, OutputFormat, QueryArgs, QueryCommand,
 };
 use crate::cdm::*;
+use crate::metric::query_metric;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use sqlx::PgPool;
+use serde_json::{Number, Value};
+use sqlx::postgres::PgRow;
 use sqlx::prelude::FromRow;
+use sqlx::{Column, PgPool, Postgres, QueryBuilder, Row, ValueRef};
 use tabled::derive::display;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
 use thiserror::Error;
 use uuid::Uuid;
+
+pub const PG_VAR_NUM_LIMIT: i32 = 65535;
 
 #[derive(Error, Debug)]
 pub enum QueryError {
@@ -25,6 +30,8 @@ pub enum QueryError {
     UnknownFormat(String),
     #[error("Couldn't delete the resource, {0}")]
     DeleteError(String),
+    #[error("Couldn't get the metrics, {0}")]
+    MetricError(String),
 }
 
 pub trait QueryGet<T>
@@ -87,10 +94,10 @@ impl QueryGet<Run> for GetRunArgs {
             SELECT run.* FROM run LEFT JOIN tag ON run.run_uuid = tag.run_uuid
             WHERE
                 ($1 IS NULL OR run.run_uuid = $1) AND
-                ($2 IS NULL OR begin < $2) AND
-                ($3 IS NULL OR begin > $3) AND
-                ($4 IS NULL OR finish < $4) AND
-                ($5 IS NULL OR finish > $5) AND
+                ($2 IS NULL OR begin <= $2) AND
+                ($3 IS NULL OR begin >= $3) AND
+                ($4 IS NULL OR finish <= $4) AND
+                ($5 IS NULL OR finish >= $5) AND
                 ($6 IS NULL OR benchmark = $6) AND
                 ($7 IS NULL OR email = $7) AND
                 ($8 IS NULL OR run.name = $8) AND
@@ -228,10 +235,10 @@ impl QueryGet<Period> for GetPeriodArgs {
             WHERE
                 ($1 IS NULL OR period_uuid = $1) AND
                 ($2 IS NULL OR sample_uuid = $2) AND
-                ($3 IS NULL OR begin < $3) AND
-                ($4 IS NULL OR begin > $4) AND
-                ($5 IS NULL OR finish < $5) AND
-                ($6 IS NULL OR finish > $6) AND
+                ($3 IS NULL OR begin <= $3) AND
+                ($4 IS NULL OR begin >= $4) AND
+                ($5 IS NULL OR finish <= $5) AND
+                ($6 IS NULL OR finish >= $6) AND
                 ($7 IS NULL OR name = $7)
             "#;
 
@@ -334,10 +341,10 @@ impl QueryGet<Data> for GetMetricDataArgs {
                 ($2 IS NULL OR iteration.iteration_uuid = $2) AND
                 ($3 IS NULL OR metric_data.metric_desc_uuid = $3) AND
                 ($4 IS NULL OR metric_desc.metric_type = $4) AND
-                ($5 IS NULL OR metric_data.begin < $5) AND
-                ($6 IS NULL OR metric_data.begin > $6) AND
-                ($7 IS NULL OR metric_data.finish < $7) AND
-                ($8 IS NULL OR metric_data.finish > $8) AND
+                ($5 IS NULL OR metric_data.begin <= $5) AND
+                ($6 IS NULL OR metric_data.begin >= $6) AND
+                ($7 IS NULL OR metric_data.finish <= $7) AND
+                ($8 IS NULL OR metric_data.finish >= $8) AND
                 ($9 IS NULL OR metric_data.value = $9) AND
                 ($10 IS NULL OR metric_data.value < $10) AND
                 ($11 IS NULL OR metric_data.value > $11)
@@ -396,10 +403,10 @@ impl QueryDelete for DeleteRunArgs {
             WHERE
                 (run.run_uuid = r.run_uuid) AND
                 ($1 IS NULL OR run.run_uuid = $1) AND
-                ($2 IS NULL OR run.begin < $2) AND
-                ($3 IS NULL OR run.begin > $3) AND
-                ($4 IS NULL OR run.finish < $4) AND
-                ($5 IS NULL OR run.finish > $5) AND
+                ($2 IS NULL OR run.begin <= $2) AND
+                ($3 IS NULL OR run.begin >= $3) AND
+                ($4 IS NULL OR run.finish <= $4) AND
+                ($5 IS NULL OR run.finish >= $5) AND
                 ($6 IS NULL OR run.benchmark = $6) AND
                 ($7 IS NULL OR run.email = $7) AND
                 ($8 IS NULL OR run.name = $8) AND
@@ -489,5 +496,6 @@ pub async fn query(pool: &PgPool, args: QueryArgs) -> Result<()> {
             DeleteCommand::Run(args) => query_delete(pool, args).await,
             DeleteCommand::Tag(args) => query_delete(pool, args).await,
         },
+        QueryCommand::Metric(metric_args) => query_metric(pool, metric_args).await,
     }
 }

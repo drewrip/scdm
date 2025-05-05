@@ -151,15 +151,12 @@ pub struct MetricDesc {
     pub source: String,
 }
 
-pub const SQL_TABLE_METRIC_DATA: &str = r#"
-    CREATE TABLE IF NOT EXISTS metric_data (
-        metric_data_id bigserial,
+pub const SQL_TABLE_NAME: &str = r#"
+    CREATE TABLE IF NOT EXISTS name (
         metric_desc_uuid uuid REFERENCES metric_desc ON DELETE CASCADE,
-        value double precision NOT NULL,
-        begin timestamptz NOT NULL,
-        finish timestamptz NOT NULL,
-        duration bigint NOT NULL,
-        PRIMARY KEY (metric_data_id, metric_desc_uuid)
+        name text NOT NULL,
+        val text NOT NULL,
+        PRIMARY KEY (metric_desc_uuid, name)
     )
 "#;
 
@@ -170,12 +167,15 @@ pub struct Name {
     pub val: String,
 }
 
-pub const SQL_TABLE_NAME: &str = r#"
-    CREATE TABLE IF NOT EXISTS name (
+pub const SQL_TABLE_METRIC_DATA: &str = r#"
+    CREATE TABLE IF NOT EXISTS metric_data (
+        metric_data_id bigserial,
         metric_desc_uuid uuid REFERENCES metric_desc ON DELETE CASCADE,
-        name text NOT NULL,
-        val text NOT NULL,
-        PRIMARY KEY (metric_desc_uuid, name)
+        value double precision NOT NULL,
+        begin timestamptz NOT NULL,
+        finish timestamptz NOT NULL,
+        duration bigint NOT NULL,
+        PRIMARY KEY (metric_data_id, metric_desc_uuid)
     )
 "#;
 

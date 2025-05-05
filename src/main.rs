@@ -9,6 +9,7 @@ use thiserror::Error;
 pub mod args;
 pub mod cdm;
 pub mod import;
+pub mod metric;
 pub mod parser;
 pub mod query;
 

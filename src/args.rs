@@ -1,3 +1,5 @@
+use std::default;
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -76,6 +78,8 @@ pub enum QueryCommand {
     Get(GetArgs),
     /// Delete a CDM resource
     Delete(DeleteArgs),
+    /// Query the data
+    Metric(MetricArgs),
 }
 
 #[derive(Debug, Args)]
@@ -116,8 +120,9 @@ pub enum GetCommand {
 }
 
 fn parse_timestamp(arg: &str) -> Result<DateTime<Utc>, SCDMError> {
-    if let Ok(human_readable) = DateTime::parse_from_rfc3339(arg) {
-        Ok(human_readable.to_utc())
+    println!("arg: {}", arg);
+    if let Ok(human_readable) = arg.parse::<DateTime<Utc>>() {
+        Ok(human_readable)
     } else {
         let n: i64 = arg
             .parse()
@@ -303,7 +308,7 @@ pub struct DeleteArgs {
 }
 
 /// For data integrity and safety, we provide no method of deleting
-/// iterations, params, samples, periods, or metric_data's.
+/// iterations, params, samples, periods, metric_desc's, or metric_data's.
 /// This should generally be unnecessary as the will automatically be
 /// removed when their parent resource is deleted.
 #[derive(Debug, Subcommand)]
@@ -352,4 +357,59 @@ pub struct DeleteTagArgs {
     /// Delete for tags where "tag_name=tag_value"
     #[clap(long = "tag", short = 't')]
     pub tag: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct MetricArgs {
+    #[clap(long = "run-uuid", short = 'r')]
+    pub run_uuid: Option<Uuid>,
+    #[clap(long = "iteration-uuid", short = 'i')]
+    pub iteration_uuid: Option<Uuid>,
+    #[clap(long = "metric-desc-uuid", short = 'm')]
+    pub metric_desc_uuid: Option<Uuid>,
+    #[clap(long = "period-uuid", short = 'p')]
+    pub period_uuid: Option<Uuid>,
+    #[clap(long = "metric-type", short = 't')]
+    pub metric_type: Option<String>,
+    /// Search for data that begins before this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
+    pub begin_before: Option<DateTime<Utc>>,
+    /// Search for data that begins after this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "begin-after", value_parser = parse_timestamp)]
+    pub begin_after: Option<DateTime<Utc>>,
+    /// Search for data that finishes before this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
+    pub finish_before: Option<DateTime<Utc>>,
+    /// Search for data that finishes after this time.
+    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
+    #[clap(long = "finish-after", value_parser = parse_timestamp)]
+    pub finish_after: Option<DateTime<Utc>>,
+    #[clap(long = "value-eq")]
+    /// Search for values equal to
+    pub value_eq: Option<f64>,
+    #[clap(long = "value-lt")]
+    /// Search for values less than
+    pub value_lt: Option<f64>,
+    /// Search for values greater than
+    #[clap(long = "value-gt")]
+    pub value_gt: Option<f64>,
+    /// Names used to breakout the data. Provide a comma separated list of
+    /// names, with or without a corresponding value. Ex: "hostname,userenv=fedora40"
+    #[clap(long = "name", short = 'n', value_delimiter = ',')]
+    pub name: Option<Vec<String>>,
+    #[clap(value_enum, long = "aggregator", short = 'a', requires = "name", default_value_t = Aggregator::None)]
+    pub aggregator: Aggregator,
+}
+
+#[derive(Debug, ValueEnum, Clone)]
+pub enum Aggregator {
+    None,
+    Avg,
+    WeightedAvg,
+    Stddev,
+    Min,
+    Max,
 }
