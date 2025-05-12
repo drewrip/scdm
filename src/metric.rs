@@ -3,10 +3,11 @@ use std::fmt;
 use crate::args::{Aggregator, MetricArgs};
 use crate::query::QueryError;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::postgres::PgRow;
 use sqlx::prelude::FromRow;
-use sqlx::{Column, PgPool, Postgres, QueryBuilder, Row, ValueRef};
+use sqlx::{Column, PgPool, Postgres, QueryBuilder, Row};
 use tabled::derive::display;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
@@ -81,18 +82,53 @@ pub fn unpack_rows(
     (header, results)
 }
 
-fn choose_aggregator(agg: Aggregator) -> String {
+fn push_choose_aggregator(
+    qb: &mut QueryBuilder<Postgres>,
+    agg: Aggregator,
+    window: Option<(DateTime<Utc>, DateTime<Utc>)>,
+) {
     match agg {
-        Aggregator::None => "metric_data.value as value",
-        Aggregator::Avg => "AVG(metric_data.value) as avg",
-        Aggregator::WeightedAvg => {
-            "SUM(metric_data.value * metric_data.duration) / SUM(metric_data.duration) as weighted_avg"
+        Aggregator::None => {
+            qb.push("metric_data.value as value");
         }
-        Aggregator::Stddev => "STDDEV(metric_data.value) as stddev",
-        Aggregator::Min => "MIN(metric_data.value) as min",
-        Aggregator::Max => "MAX(metric_data.value) as max",
-    }
-    .to_string()
+        Aggregator::Avg => {
+            qb.push("AVG(metric_data.value) as avg");
+        }
+        Aggregator::WeightedAvg => {
+            let duration_correction = match window {
+                Some((begin, finish)) => format!(r#"
+                        (
+                            metric_data.duration
+                                - (EXTRACT(EPOCH FROM (metric_data.begin))::bigint * 1000 - {})
+                                - ({} - EXTRACT(EPOCH FROM (metric_data.finish))::bigint * 1000)
+                        )
+                    "#, begin.timestamp_millis(), finish.timestamp_millis()).to_string(),
+                None => {
+                    r#"
+                        (
+                            metric_data.duration
+                                - (EXTRACT(EPOCH FROM (metric_data.begin))::bigint * 1000 - EXTRACT(EPOCH FROM (poi.begin))::bigint * 1000)
+                                - (EXTRACT(EPOCH FROM (poi.finish))::bigint * 1000 - EXTRACT(EPOCH FROM (metric_data.finish))::bigint * 1000)
+                        )
+                    "#.to_string()
+                }
+            };
+            qb.push("SUM(metric_data.value * ");
+            qb.push(&duration_correction);
+            qb.push(" ) / SUM( ");
+            qb.push(duration_correction);
+            qb.push(" ) as weighted_avg");
+        }
+        Aggregator::Stddev => {
+            qb.push("STDDEV(metric_data.value) as stddev");
+        }
+        Aggregator::Min => {
+            qb.push("MIN(metric_data.value) as min");
+        }
+        Aggregator::Max => {
+            qb.push("MAX(metric_data.value) as max");
+        }
+    };
 }
 
 #[derive(Clone, Debug, FromRow, Tabled, Serialize)]
@@ -169,7 +205,13 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         qb.push(format!(" \"{}\".name_value as \"{}_v\" ", name, name));
         qb.push(", ");
     }
-    qb.push(choose_aggregator(metric_args.aggregator.clone()));
+    let window = if let (Some(begin), Some(finish)) = (metric_args.begin, metric_args.finish) {
+        Some((begin, finish))
+    } else {
+        None
+    };
+
+    push_choose_aggregator(&mut qb, metric_args.aggregator.clone(), window);
 
     let join_part: &str = r#"
         FROM metric_data
@@ -211,6 +253,12 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         }
     }
 
+    if let Some(ref_period) = metric_args.ref_period {
+        qb.push(" , (SELECT begin, finish FROM period WHERE period_uuid = ");
+        qb.push_bind(ref_period);
+        qb.push(") as poi");
+    }
+
     qb.push(" WHERE ");
     let mut sep = qb.separated(" AND ");
     sep.push(" TRUE ");
@@ -230,22 +278,6 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         sep.push(" metric_desc.metric_type = ");
         sep.push_bind_unseparated(metric_type.clone());
     }
-    if let Some(begin_before) = metric_args.begin_before {
-        sep.push(" metric_data.begin <= ");
-        sep.push_bind_unseparated(begin_before);
-    }
-    if let Some(begin_after) = metric_args.begin_after {
-        sep.push(" metric_data.begin >= ");
-        sep.push_bind_unseparated(begin_after);
-    }
-    if let Some(finish_before) = metric_args.finish_before {
-        sep.push(" metric_data.finish <= ");
-        sep.push_bind_unseparated(finish_before);
-    }
-    if let Some(finish_after) = metric_args.finish_after {
-        sep.push(" metric_data.finish >= ");
-        sep.push_bind_unseparated(finish_after);
-    }
     if let Some(value_eq) = metric_args.value_eq {
         sep.push(" metric_data.value = ");
         sep.push_bind_unseparated(value_eq);
@@ -257,6 +289,40 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
     if let Some(value_gt) = metric_args.value_gt {
         sep.push(" metric_data.value > ");
         sep.push_bind_unseparated(value_gt);
+    }
+
+    if metric_args.ref_period.is_some() {
+        sep.push(
+            r#"
+        (
+            (metric_data.begin > poi.begin AND metric_data.begin < poi.finish) OR
+            (metric_data.finish > poi.begin AND metric_data.finish < poi.finish) OR
+            (metric_data.begin < poi.begin AND metric_data.finish > poi.finish)
+        )
+        "#,
+        );
+    }
+    if let (Some(begin), Some(finish)) = (metric_args.begin, metric_args.finish) {
+        sep.push(" ( ");
+        sep.push_unseparated("( metric_data.begin > ");
+        sep.push_bind_unseparated(begin);
+        sep.push_unseparated(" AND metric_data.begin < ");
+        sep.push_bind_unseparated(finish);
+        sep.push_unseparated(" ) OR ");
+
+        sep.push_unseparated("( metric_data.finish > ");
+        sep.push_bind_unseparated(begin);
+        sep.push_unseparated(" AND metric_data.finish < ");
+        sep.push_bind_unseparated(finish);
+        sep.push_unseparated(" ) OR ");
+
+        sep.push_unseparated("( metric_data.begin < ");
+        sep.push_bind_unseparated(begin);
+        sep.push_unseparated(" AND metric_data.finish > ");
+        sep.push_bind_unseparated(finish);
+        sep.push_unseparated(" )");
+
+        sep.push_unseparated(" ) ");
     }
 
     if metric_args.name.is_some() && !matches!(metric_args.aggregator, Aggregator::None) {

@@ -1,5 +1,3 @@
-use std::default;
-
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -367,26 +365,24 @@ pub struct MetricArgs {
     pub iteration_uuid: Option<Uuid>,
     #[clap(long = "metric-desc-uuid", short = 'm')]
     pub metric_desc_uuid: Option<Uuid>,
+    /// Restricts the considered data to data that belonds to this period.
+    /// This is notably different than the `ref-period` option.
     #[clap(long = "period-uuid", short = 'p')]
     pub period_uuid: Option<Uuid>,
     #[clap(long = "metric-type", short = 't')]
     pub metric_type: Option<String>,
-    /// Search for data that begins before this time.
+
+    /// ref-period is a convenience option to use in place of specifying both a `begin`,
+    /// and an `end`. It inherits the period's begin and end.
+    #[clap(long = "ref-period", conflicts_with_all = ["begin", "finish"])]
+    pub ref_period: Option<Uuid>,
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "begin-before", short = 'b', value_parser = parse_timestamp)]
-    pub begin_before: Option<DateTime<Utc>>,
-    /// Search for data that begins after this time.
+    #[clap(long = "begin", short = 'b', value_parser = parse_timestamp, conflicts_with = "ref_period", requires = "finish")]
+    pub begin: Option<DateTime<Utc>>,
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "begin-after", value_parser = parse_timestamp)]
-    pub begin_after: Option<DateTime<Utc>>,
-    /// Search for data that finishes before this time.
-    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "finish-before", short = 'f', value_parser = parse_timestamp)]
-    pub finish_before: Option<DateTime<Utc>>,
-    /// Search for data that finishes after this time.
-    /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
-    #[clap(long = "finish-after", value_parser = parse_timestamp)]
-    pub finish_after: Option<DateTime<Utc>>,
+    #[clap(long = "finish", short = 'f', value_parser = parse_timestamp, conflicts_with = "ref_period", requires = "begin")]
+    pub finish: Option<DateTime<Utc>>,
+
     #[clap(long = "value-eq")]
     /// Search for values equal to
     pub value_eq: Option<f64>,

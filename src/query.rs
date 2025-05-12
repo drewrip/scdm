@@ -1,17 +1,15 @@
 use crate::args::{
-    Aggregator, DeleteCommand, DeleteRunArgs, DeleteTagArgs, GetCommand, GetIterationArgs,
-    GetMetricDataArgs, GetMetricDescArgs, GetNameArgs, GetParamArgs, GetPeriodArgs, GetRunArgs,
-    GetSampleArgs, GetTagArgs, MetricArgs, OutputFormat, QueryArgs, QueryCommand,
+    DeleteCommand, DeleteRunArgs, DeleteTagArgs, GetCommand, GetIterationArgs, GetMetricDataArgs,
+    GetMetricDescArgs, GetNameArgs, GetParamArgs, GetPeriodArgs, GetRunArgs, GetSampleArgs,
+    GetTagArgs, OutputFormat, QueryArgs, QueryCommand,
 };
 use crate::cdm::*;
 use crate::metric::query_metric;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use serde_json::{Number, Value};
-use sqlx::postgres::PgRow;
+use sqlx::PgPool;
 use sqlx::prelude::FromRow;
-use sqlx::{Column, PgPool, Postgres, QueryBuilder, Row, ValueRef};
 use tabled::derive::display;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
