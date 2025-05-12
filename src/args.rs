@@ -48,6 +48,8 @@ pub enum Command {
     Query(QueryArgs),
     /// Import run from OpenSearch CDM DB
     Import(ImportArgs),
+    /// Init the SCDM tables if they don't exist
+    Init,
 }
 
 #[derive(Debug, Args)]

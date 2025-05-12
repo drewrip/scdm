@@ -9,6 +9,7 @@ use thiserror::Error;
 pub mod args;
 pub mod cdm;
 pub mod import;
+pub mod init;
 pub mod metric;
 pub mod parser;
 pub mod query;
@@ -23,35 +24,6 @@ pub enum SCDMError {
     FailedTableInit(String),
     #[error("Failed to parse timestamp: {0}")]
     FailedTimestampParse(String),
-}
-
-pub async fn build_tables(pool: &PgPool) -> Result<()> {
-    let mut txn = pool.begin().await?;
-    // Creation order is important here because of foreign keys.
-    // The other option is to defer the integrity check until the
-    // transaction commits.
-    sqlx::query(cdm::SQL_TABLE_RUN).execute(&mut *txn).await?;
-    sqlx::query(cdm::SQL_TABLE_TAG).execute(&mut *txn).await?;
-    sqlx::query(cdm::SQL_TABLE_ITERATION)
-        .execute(&mut *txn)
-        .await?;
-    sqlx::query(cdm::SQL_TABLE_PARAM).execute(&mut *txn).await?;
-    sqlx::query(cdm::SQL_TABLE_SAMPLE)
-        .execute(&mut *txn)
-        .await?;
-    sqlx::query(cdm::SQL_TABLE_PERIOD)
-        .execute(&mut *txn)
-        .await?;
-    sqlx::query(cdm::SQL_TABLE_METRIC_DESC)
-        .execute(&mut *txn)
-        .await?;
-    sqlx::query(cdm::SQL_TABLE_NAME).execute(&mut *txn).await?;
-    sqlx::query(cdm::SQL_TABLE_METRIC_DATA)
-        .execute(&mut *txn)
-        .await?;
-    txn.commit().await?;
-
-    Ok(())
 }
 
 #[tokio::main]
@@ -90,10 +62,6 @@ async fn main() -> Result<()> {
 
     let pool = PgPool::connect_with(conn_opts).await?;
 
-    build_tables(&pool)
-        .await
-        .map_err(|e| SCDMError::FailedTableInit(format!("failure {}", e)))?;
-
     let result = match args.command {
         Command::Parse(parse_args) => {
             let dir_path = Path::new(&parse_args.path);
@@ -101,6 +69,7 @@ async fn main() -> Result<()> {
         }
         Command::Query(query_args) => query::query(&pool, query_args).await,
         Command::Import(import_args) => import::import(&pool, import_args).await,
+        Command::Init => init::init_tables(&pool).await,
     };
 
     result
