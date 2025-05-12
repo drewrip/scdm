@@ -118,7 +118,6 @@ pub enum GetCommand {
 }
 
 fn parse_timestamp(arg: &str) -> Result<DateTime<Utc>, SCDMError> {
-    println!("arg: {}", arg);
     if let Ok(human_readable) = arg.parse::<DateTime<Utc>>() {
         Ok(human_readable)
     } else {
@@ -382,6 +381,9 @@ pub struct MetricArgs {
     /// Either a Unix epoch timestamp in millis, or a valid RFC 3339 timestamp
     #[clap(long = "finish", short = 'f', value_parser = parse_timestamp, conflicts_with = "ref_period", requires = "begin")]
     pub finish: Option<DateTime<Utc>>,
+
+    #[clap(long = "resolution", default_value_t = 1)]
+    pub resolution: u64,
 
     #[clap(long = "value-eq")]
     /// Search for values equal to

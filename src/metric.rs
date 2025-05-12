@@ -6,11 +6,9 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::postgres::PgRow;
-use sqlx::prelude::FromRow;
 use sqlx::{Column, PgPool, Postgres, QueryBuilder, Row};
-use tabled::derive::display;
+use tabled::Table;
 use tabled::settings::Style;
-use tabled::{Table, Tabled};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize)]
@@ -64,8 +62,15 @@ pub fn unpack_rows(
             row.push(pg_row.get(next_idx));
             next_idx += 1;
         }
+        let begin: DateTime<Utc> = pg_row.try_get(next_idx).unwrap_or(DateTime::UNIX_EPOCH);
+        row.push(begin.to_string());
+        next_idx += 1;
+        let finish: DateTime<Utc> = pg_row.try_get(next_idx).unwrap_or(DateTime::UNIX_EPOCH);
+        row.push(finish.to_string());
+        next_idx += 1;
         let value: f64 = pg_row.try_get(next_idx).unwrap_or(0.0);
         row.push(value.to_string()); // aggregated value
+
         results.push(row);
     }
     let header: Vec<String> = pg_rows
@@ -82,11 +87,7 @@ pub fn unpack_rows(
     (header, results)
 }
 
-fn push_choose_aggregator(
-    qb: &mut QueryBuilder<Postgres>,
-    agg: Aggregator,
-    window: Option<(DateTime<Utc>, DateTime<Utc>)>,
-) {
+fn push_choose_aggregator(qb: &mut QueryBuilder<Postgres>, agg: Aggregator) {
     match agg {
         Aggregator::None => {
             qb.push("metric_data.value as value");
@@ -95,24 +96,13 @@ fn push_choose_aggregator(
             qb.push("AVG(metric_data.value) as avg");
         }
         Aggregator::WeightedAvg => {
-            let duration_correction = match window {
-                Some((begin, finish)) => format!(r#"
+            let duration_correction = r#"
                         (
                             metric_data.duration
-                                - (EXTRACT(EPOCH FROM (metric_data.begin))::bigint * 1000 - {})
-                                - ({} - EXTRACT(EPOCH FROM (metric_data.finish))::bigint * 1000)
+                                - (EXTRACT(EPOCH FROM (metric_data.begin))::bigint * 1000 - EXTRACT(EPOCH FROM (woi.window_begin))::bigint * 1000)
+                                - (EXTRACT(EPOCH FROM (woi.window_finish))::bigint * 1000 - EXTRACT(EPOCH FROM (metric_data.finish))::bigint * 1000)
                         )
-                    "#, begin.timestamp_millis(), finish.timestamp_millis()).to_string(),
-                None => {
-                    r#"
-                        (
-                            metric_data.duration
-                                - (EXTRACT(EPOCH FROM (metric_data.begin))::bigint * 1000 - EXTRACT(EPOCH FROM (poi.begin))::bigint * 1000)
-                                - (EXTRACT(EPOCH FROM (poi.finish))::bigint * 1000 - EXTRACT(EPOCH FROM (metric_data.finish))::bigint * 1000)
-                        )
-                    "#.to_string()
-                }
-            };
+                        "#;
             qb.push("SUM(metric_data.value * ");
             qb.push(&duration_correction);
             qb.push(" ) / SUM( ");
@@ -129,18 +119,6 @@ fn push_choose_aggregator(
             qb.push("MAX(metric_data.value) as max");
         }
     };
-}
-
-#[derive(Clone, Debug, FromRow, Tabled, Serialize)]
-pub struct Metric {
-    pub run_uuid: Uuid,
-    pub iteration_uuid: Uuid,
-    pub metric_type: String,
-    #[tabled(display("display::option", "null"))]
-    pub name: Option<String>,
-    #[tabled(display("display::option", "null"))]
-    pub val: Option<String>,
-    pub value: f64,
 }
 
 fn push_metric_subquery(
@@ -205,13 +183,9 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         qb.push(format!(" \"{}\".name_value as \"{}_v\" ", name, name));
         qb.push(", ");
     }
-    let window = if let (Some(begin), Some(finish)) = (metric_args.begin, metric_args.finish) {
-        Some((begin, finish))
-    } else {
-        None
-    };
+    qb.push(" woi.window_begin, woi.window_finish, ");
 
-    push_choose_aggregator(&mut qb, metric_args.aggregator.clone(), window);
+    push_choose_aggregator(&mut qb, metric_args.aggregator.clone());
 
     let join_part: &str = r#"
         FROM metric_data
@@ -254,9 +228,57 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
     }
 
     if let Some(ref_period) = metric_args.ref_period {
-        qb.push(" , (SELECT begin, finish FROM period WHERE period_uuid = ");
+        qb.push(format!(r#"
+            CROSS JOIN
+            (
+                SELECT
+                    window_begin,
+                    window_begin + window_duration as window_finish
+                FROM
+                    (
+                        SELECT
+                            (period.finish - period.begin)/{} as window_duration,
+                            generate_series(period.begin, period.finish, (period.finish - period.begin)/{}) as window_begin
+                        FROM period
+                        WHERE period_uuid =
+        "#, metric_args.resolution, metric_args.resolution));
         qb.push_bind(ref_period);
-        qb.push(") as poi");
+        qb.push(format!(
+            " ) as windows ORDER BY window_begin, window_finish LIMIT {} ) woi",
+            metric_args.resolution
+        ));
+    } else if let (Some(begin), Some(finish)) = (metric_args.begin, metric_args.finish) {
+        qb.push(
+            r#"
+            CROSS JOIN
+            (
+                SELECT
+                    window_begin,
+                    window_begin + window_duration as window_finish
+                FROM
+                    (
+                        SELECT
+                            (
+        "#,
+        );
+        qb.push_bind(finish);
+        qb.push(" - ");
+        qb.push_bind(begin);
+        qb.push(format!(
+            ")/{} as window_duration, generate_series(",
+            metric_args.resolution
+        ));
+        qb.push_bind(begin);
+        qb.push(", ");
+        qb.push_bind(finish);
+        qb.push(", (");
+        qb.push_bind(finish);
+        qb.push(" - ");
+        qb.push_bind(begin);
+        qb.push(format!(
+            ")/{}) as window_begin ) windows ORDER BY window_begin, window_finish LIMIT {} ) woi",
+            metric_args.resolution, metric_args.resolution
+        ));
     }
 
     qb.push(" WHERE ");
@@ -295,9 +317,9 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         sep.push(
             r#"
         (
-            (metric_data.begin > poi.begin AND metric_data.begin < poi.finish) OR
-            (metric_data.finish > poi.begin AND metric_data.finish < poi.finish) OR
-            (metric_data.begin < poi.begin AND metric_data.finish > poi.finish)
+            (metric_data.begin > woi.window_begin AND metric_data.begin < woi.window_finish) OR
+            (metric_data.finish > woi.window_begin AND metric_data.finish < woi.window_finish) OR
+            (metric_data.begin < woi.window_begin AND metric_data.finish > woi.window_finish)
         )
         "#,
         );
@@ -331,6 +353,8 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         sep.push("run.run_uuid");
         sep.push("iteration.iteration_uuid");
         sep.push("metric_desc.metric_type");
+        sep.push("woi.window_begin");
+        sep.push("woi.window_finish");
         for (name, _) in names.clone() {
             sep.push(format!("\"{}\".name_value", name));
         }
@@ -342,6 +366,8 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         for (name, _) in &names {
             sep.push(format!("\"{}\".name_value", name));
         }
+        sep.push("woi.window_begin");
+        sep.push("woi.window_finish");
     }
 
     let query = qb.build();
