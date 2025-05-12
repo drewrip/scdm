@@ -400,6 +400,9 @@ pub struct MetricArgs {
     pub name: Option<Vec<String>>,
     #[clap(value_enum, long = "aggregator", short = 'a', requires = "name", default_value_t = Aggregator::None)]
     pub aggregator: Aggregator,
+
+    #[clap(long = "output", short = 'o')]
+    pub output: Option<OutputFormat>,
 }
 
 #[derive(Debug, ValueEnum, Clone)]

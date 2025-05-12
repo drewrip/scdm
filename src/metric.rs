@@ -1,12 +1,13 @@
 use std::fmt;
 
-use crate::args::{Aggregator, MetricArgs};
+use crate::args::{Aggregator, MetricArgs, OutputFormat};
 use crate::query::QueryError;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, PgPool, Postgres, QueryBuilder, Row};
+use std::collections::HashMap;
 use tabled::Table;
 use tabled::settings::Style;
 use uuid::Uuid;
@@ -377,8 +378,37 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         .map_err(|e| QueryError::MetricError(format!("{}", e)))?;
 
     let (header, rows) = unpack_rows(res, &names);
-    let mut table = Table::from_iter(vec![header].into_iter().chain(rows));
-    table.with(Style::modern());
-    println!("{}", table.to_string());
+    let out_string = match metric_args.output {
+        Some(o_fmt) => match o_fmt {
+            OutputFormat::CSV => {
+                let mut writer = csv::Writer::from_writer(vec![]);
+                writer.write_record(&header)?;
+                for row in rows {
+                    writer.write_record(&row)?;
+                }
+                String::from_utf8(
+                    writer.into_inner().map_err(|e| {
+                        QueryError::SerializeError(format!("CSV ({})", e.to_string()))
+                    })?,
+                )
+                .map_err(|e| QueryError::SerializeError(format!("CSV ({})", e.to_string())))?
+            }
+            OutputFormat::JSON => {
+                let results: Vec<HashMap<String, String>> = rows
+                    .into_iter()
+                    .map(|r| HashMap::from_iter(header.clone().into_iter().zip(r.into_iter())))
+                    .collect();
+                serde_json::to_string_pretty::<Vec<HashMap<String, String>>>(&results)
+                    .map_err(|e| QueryError::SerializeError(format!("JSON ({})", e.to_string())))?
+            }
+        },
+        None => {
+            let mut table = Table::from_iter(vec![header].into_iter().chain(rows));
+            table.with(Style::modern());
+            table.to_string()
+        }
+    };
+
+    println!("{}", out_string);
     Ok(())
 }
