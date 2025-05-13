@@ -24,28 +24,27 @@ pub enum ImportError {
     ArgError(String),
 }
 
-fn choose_query(import_args: ImportArgs) -> Result<Value, ImportError> {
-    if import_args.all {
-        Ok(json!({
+fn build_queries(run_uuid: Option<Vec<Uuid>>) -> Vec<Value> {
+    match run_uuid {
+        Some(uuids) => uuids
+            .iter()
+            .map(|u| {
+                json!({
+                    "query": {
+                        "term": {
+                            "run.run-uuid": {
+                                "value": u,
+                            },
+                        },
+                    },
+                })
+            })
+            .collect(),
+        None => vec![json!({
             "query": {
                 "match_all": {},
             },
-        }))
-    } else {
-        match import_args.run_uuid {
-            Some(run_uuid) => Ok(json!({
-                "query": {
-                    "term": {
-                        "run.run-uuid": {
-                            "value": run_uuid,
-                        },
-                    },
-                },
-            })),
-            None => Err(ImportError::ArgError(
-                "neither run_uuid or all specified".to_string(),
-            )),
-        }
+        })],
     }
 }
 
@@ -89,48 +88,51 @@ async fn request<T: DeserializeOwned>(
 
 pub async fn import(pool: &PgPool, args: ImportArgs) -> Result<()> {
     let client = OpenSearch::default();
-    let query = choose_query(args)?;
 
-    let runs = request::<RunJson>(&client, "cdmv8dev-run", query.clone()).await?;
-    let tags = request::<TagJson>(&client, "cdmv8dev-tag", query.clone()).await?;
-    let mut iterations =
-        request::<IterationJson>(&client, "cdmv8dev-iteration", query.clone()).await?;
-    let params = request::<ParamJson>(&client, "cdmv8dev-param", query.clone()).await?;
-    let mut samples = request::<SampleJson>(&client, "cdmv8dev-sample", query.clone()).await?;
-    let mut periods = request::<PeriodJson>(&client, "cdmv8dev-period", query.clone()).await?;
-    let mut metric_descs =
-        request::<MetricDescJson>(&client, "cdmv8dev-metric_desc", query.clone()).await?;
-    let mut metric_datas =
-        request::<MetricDataJson>(&client, "cdmv8dev-metric_data", query.clone()).await?;
+    let queries = build_queries(args.run_uuid);
 
-    let mut num_new = 0;
-    let mut txn = pool.begin().await?;
-    // Default resources for data that is scoped to the run
-    let mut globals: HashMap<Uuid, GlobalResource> = HashMap::new();
+    for query in queries {
+        let runs = request::<RunJson>(&client, "cdmv8dev-run", query.clone()).await?;
+        let tags = request::<TagJson>(&client, "cdmv8dev-tag", query.clone()).await?;
+        let mut iterations =
+            request::<IterationJson>(&client, "cdmv8dev-iteration", query.clone()).await?;
+        let params = request::<ParamJson>(&client, "cdmv8dev-param", query.clone()).await?;
+        let mut samples = request::<SampleJson>(&client, "cdmv8dev-sample", query.clone()).await?;
+        let mut periods = request::<PeriodJson>(&client, "cdmv8dev-period", query.clone()).await?;
+        let mut metric_descs =
+            request::<MetricDescJson>(&client, "cdmv8dev-metric_desc", query.clone()).await?;
+        let mut metric_datas =
+            request::<MetricDataJson>(&client, "cdmv8dev-metric_data", query.clone()).await?;
 
-    let (
-        new_run_rows,
-        mut global_iterations,
-        mut global_samples,
-        mut global_periods,
-        mut global_metric_descs,
-        mut global_metric_datas,
-    ) = insert_runs(&mut txn, &mut globals, &runs.iter().collect()).await?;
-    iterations.append(&mut global_iterations);
-    samples.append(&mut global_samples);
-    periods.append(&mut global_periods);
-    metric_descs.append(&mut global_metric_descs);
-    metric_datas.append(&mut global_metric_datas);
-    num_new += new_run_rows;
+        let mut num_new = 0;
+        let mut txn = pool.begin().await?;
+        // Default resources for data that is scoped to the run
+        let mut globals: HashMap<Uuid, GlobalResource> = HashMap::new();
 
-    num_new += insert_tags(&mut txn, &tags.iter().collect()).await?;
-    num_new += insert_iterations(&mut txn, &iterations.iter().collect()).await?;
-    num_new += insert_params(&mut txn, &params.iter().collect()).await?;
-    num_new += insert_samples(&mut txn, &samples.iter().collect()).await?;
-    num_new += insert_periods(&mut txn, &periods.iter().collect()).await?;
-    num_new += insert_metric_descs(&mut txn, &globals, &metric_descs.iter().collect()).await?;
-    num_new += insert_metric_datas(&mut txn, &metric_datas.iter().collect()).await?;
-    txn.commit().await?;
-    println!("added {} rows", num_new);
+        let (
+            new_run_rows,
+            mut global_iterations,
+            mut global_samples,
+            mut global_periods,
+            mut global_metric_descs,
+            mut global_metric_datas,
+        ) = insert_runs(&mut txn, &mut globals, &runs.iter().collect()).await?;
+        iterations.append(&mut global_iterations);
+        samples.append(&mut global_samples);
+        periods.append(&mut global_periods);
+        metric_descs.append(&mut global_metric_descs);
+        metric_datas.append(&mut global_metric_datas);
+        num_new += new_run_rows;
+
+        num_new += insert_tags(&mut txn, &tags.iter().collect()).await?;
+        num_new += insert_iterations(&mut txn, &iterations.iter().collect()).await?;
+        num_new += insert_params(&mut txn, &params.iter().collect()).await?;
+        num_new += insert_samples(&mut txn, &samples.iter().collect()).await?;
+        num_new += insert_periods(&mut txn, &periods.iter().collect()).await?;
+        num_new += insert_metric_descs(&mut txn, &globals, &metric_descs.iter().collect()).await?;
+        num_new += insert_metric_datas(&mut txn, &metric_datas.iter().collect()).await?;
+        txn.commit().await?;
+        println!("added {} rows", num_new);
+    }
     Ok(())
 }

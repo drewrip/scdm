@@ -55,8 +55,8 @@ pub enum Command {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub struct ImportArgs {
-    #[clap(long = "run-uuid")]
-    pub run_uuid: Option<Uuid>,
+    #[clap(long = "run-uuid", value_delimiter = ',')]
+    pub run_uuid: Option<Vec<Uuid>>,
     #[clap(long = "all", action)]
     pub all: bool,
 }
