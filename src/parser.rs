@@ -131,7 +131,7 @@ impl Global for IterationJson {
     fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
         IterationJson {
             cdm: CDMSpecJson {
-                ver: "v9dev".to_string(),
+                ver: "v8dev".to_string(),
             },
             iteration: IterationSpecJson {
                 iteration_uuid: my_uuid,
@@ -181,7 +181,7 @@ impl Global for MetricDataJson {
     fn global(parent_uuid: Uuid, _my_uuid: Uuid) -> Self {
         MetricDataJson {
             cdm: CDMSpecJson {
-                ver: "v9dev".to_string(),
+                ver: "v8dev".to_string(),
             },
             metric_data: MetricDataSpecJson {
                 begin: DateTime::<Utc>::from_timestamp_nanos(0),
@@ -222,7 +222,7 @@ impl Global for MetricDescJson {
     fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
         MetricDescJson {
             cdm: CDMSpecJson {
-                ver: "v9dev".to_string(),
+                ver: "v8dev".to_string(),
             },
             metric_desc: MetricDescSpecJson {
                 metric_desc_uuid: my_uuid,
@@ -288,7 +288,7 @@ impl Global for PeriodJson {
     fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
         PeriodJson {
             cdm: CDMSpecJson {
-                ver: "v9dev".to_string(),
+                ver: "v8dev".to_string(),
             },
             period: PeriodSpecJson {
                 period_uuid: my_uuid,
@@ -364,7 +364,7 @@ impl Global for SampleJson {
     fn global(parent_uuid: Uuid, my_uuid: Uuid) -> Self {
         SampleJson {
             cdm: CDMSpecJson {
-                ver: "v9dev".to_string(),
+                ver: "v8dev".to_string(),
             },
             sample: SampleSpecJson {
                 sample_uuid: my_uuid,
