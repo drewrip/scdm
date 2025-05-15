@@ -128,6 +128,7 @@ fn push_metric_subquery(
     maybe_value: Option<String>,
 ) {
     let subquery_part: &str = r#"
+        LEFT JOIN
         (SELECT
             name.metric_desc_uuid as metric_desc_uuid,
             metric_desc.metric_type as metric_type,
@@ -168,9 +169,9 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         names.push((n, v.cloned()));
     }
 
-    let (base_name, base_value) = match names.clone().first() {
-        Some(first) => (first.clone().0, first.clone().1),
-        None => ("base".to_string(), None),
+    let (using_default, base_name, base_value) = match names.clone().first() {
+        Some(first) => (false, first.clone().0, first.clone().1),
+        None => (true, "base".to_string(), None),
     };
     let select_part: &str = r#"
         SELECT
@@ -200,22 +201,12 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
             ON iteration.iteration_uuid = sample.iteration_uuid
         LEFT JOIN run
             ON run.run_uuid = iteration.run_uuid
-        LEFT JOIN
     "#;
 
     qb.push(join_part);
 
-    push_metric_subquery(&mut qb, Some(base_name.clone()), base_value);
-    if names.len() > 1 {
-        qb.push(" ON ");
-        qb.push(format!(
-            " metric_desc.metric_desc_uuid = \"{}\".metric_desc_uuid",
-            base_name
-        ));
-        qb.push(" LEFT JOIN ");
-    }
     let mut last_name = base_name.clone();
-    for (i, (name, maybe_value)) in names.clone().into_iter().enumerate().skip(1) {
+    for (i, (name, maybe_value)) in names.clone().into_iter().enumerate() {
         push_metric_subquery(&mut qb, Some(name.clone()), maybe_value);
         qb.push(" ON ");
         qb.push(format!(
@@ -318,30 +309,30 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         sep.push(
             r#"
         (
-            (metric_data.begin > woi.window_begin AND metric_data.begin < woi.window_finish) OR
-            (metric_data.finish > woi.window_begin AND metric_data.finish < woi.window_finish) OR
-            (metric_data.begin < woi.window_begin AND metric_data.finish > woi.window_finish)
+            (metric_data.begin >= woi.window_begin AND metric_data.begin <= woi.window_finish) OR
+            (metric_data.finish >= woi.window_begin AND metric_data.finish <= woi.window_finish) OR
+            (metric_data.begin <= woi.window_begin AND metric_data.finish >= woi.window_finish)
         )
         "#,
         );
     }
     if let (Some(begin), Some(finish)) = (metric_args.begin, metric_args.finish) {
         sep.push(" ( ");
-        sep.push_unseparated("( metric_data.begin > ");
+        sep.push_unseparated("( metric_data.begin >= ");
         sep.push_bind_unseparated(begin);
-        sep.push_unseparated(" AND metric_data.begin < ");
+        sep.push_unseparated(" AND metric_data.begin <= ");
         sep.push_bind_unseparated(finish);
         sep.push_unseparated(" ) OR ");
 
-        sep.push_unseparated("( metric_data.finish > ");
+        sep.push_unseparated("( metric_data.finish >= ");
         sep.push_bind_unseparated(begin);
-        sep.push_unseparated(" AND metric_data.finish < ");
+        sep.push_unseparated(" AND metric_data.finish <= ");
         sep.push_bind_unseparated(finish);
         sep.push_unseparated(" ) OR ");
 
-        sep.push_unseparated("( metric_data.begin < ");
+        sep.push_unseparated("( metric_data.begin <= ");
         sep.push_bind_unseparated(begin);
-        sep.push_unseparated(" AND metric_data.finish > ");
+        sep.push_unseparated(" AND metric_data.finish >= ");
         sep.push_bind_unseparated(finish);
         sep.push_unseparated(" )");
 
