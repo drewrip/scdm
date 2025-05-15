@@ -60,7 +60,7 @@ pub fn unpack_rows(
         ];
         let mut next_idx = 3;
         for _ in names {
-            row.push(pg_row.get(next_idx));
+            row.push(pg_row.try_get(next_idx).unwrap_or("null".to_string()));
             next_idx += 1;
         }
         let begin: DateTime<Utc> = pg_row.try_get(next_idx).unwrap_or(DateTime::UNIX_EPOCH);
@@ -169,9 +169,9 @@ pub async fn query_metric(pool: &PgPool, metric_args: MetricArgs) -> Result<()> 
         names.push((n, v.cloned()));
     }
 
-    let (using_default, base_name, base_value) = match names.clone().first() {
-        Some(first) => (false, first.clone().0, first.clone().1),
-        None => (true, "base".to_string(), None),
+    let base_name = match names.clone().first() {
+        Some(first) => first.clone().0,
+        None => "base".to_string(),
     };
     let select_part: &str = r#"
         SELECT
