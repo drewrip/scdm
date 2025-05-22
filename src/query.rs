@@ -89,7 +89,7 @@ where
 impl QueryGet<Run> for GetRunArgs {
     async fn query_get(&self, pool: &PgPool) -> Result<Vec<Run>, QueryError> {
         let raw_query: &str = r#"
-            SELECT run.* FROM run LEFT JOIN tag ON run.run_uuid = tag.run_uuid
+            SELECT DISTINCT(run.*) FROM run LEFT JOIN tag ON run.run_uuid = tag.run_uuid
             WHERE
                 ($1 IS NULL OR run.run_uuid = $1) AND
                 ($2 IS NULL OR begin <= $2) AND

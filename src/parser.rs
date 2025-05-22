@@ -38,15 +38,24 @@ pub struct GlobalResource {
     pub metric_data: MetricDataJson,
 }
 
-fn date_time_utc_from_str<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+pub fn date_time_utc_from_str<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let s: String = Deserialize::deserialize(deserializer)?;
-    let n: i64 = s.parse().map_err(de::Error::custom)?;
-    DateTime::from_timestamp_millis(n)
-        .ok_or(ParseError::TimestampParseFailed(format!("{}", n)))
-        .map_err(de::Error::custom)
+    if let Ok(human_readable) = s.parse::<DateTime<Utc>>() {
+        Ok(human_readable)
+    } else {
+        let n: i64 = s
+            .parse()
+            .map_err(|_| ParseError::TimestampParseFailed(s.to_string()))
+            .map_err(de::Error::custom)?;
+
+        let res = DateTime::from_timestamp_millis(n)
+            .ok_or(ParseError::TimestampParseFailed(s.to_string()))
+            .map_err(de::Error::custom)?;
+        Ok(res)
+    }
 }
 
 fn number_from_str<'de, D, F>(deserializer: D) -> Result<F, D::Error>
@@ -417,6 +426,7 @@ pub enum BodyJson {
     Run(RunJson),
     Sample(SampleJson),
     Tag(TagJson),
+    Name(Name),
 }
 
 fn parse_body(index_type: IndexType, body_jsonl: String) -> Result<BodyJson> {
@@ -788,7 +798,7 @@ pub fn extract_names(metric_desc: &MetricDescJson) -> Vec<Name> {
         .collect()
 }
 
-async fn insert_records(
+pub async fn insert_records(
     txn: &mut Transaction<'_, Postgres>,
     records: &Vec<BodyJson>,
 ) -> Result<u64> {
@@ -801,6 +811,7 @@ async fn insert_records(
     let mut periods = Vec::new();
     let mut metric_descs = Vec::new();
     let mut metric_datas = Vec::new();
+    let mut names = Vec::new();
 
     for record in records {
         match record {
@@ -812,15 +823,17 @@ async fn insert_records(
             BodyJson::Period(period) => periods.push(period),
             BodyJson::MetricDesc(metric_desc) => metric_descs.push(metric_desc),
             BodyJson::MetricData(metric_data) => metric_datas.push(metric_data),
+            BodyJson::Name(name) => names.push(name.clone()),
         };
     }
 
-    let names: Vec<Name> = metric_descs
+    let extracted_names = metric_descs
         .clone()
         .into_iter()
         .map(extract_names)
-        .flatten()
-        .collect();
+        .flatten();
+
+    names.extend(extracted_names);
 
     // Default resources for data that is scoped to the run
     let mut globals: HashMap<Uuid, GlobalResource> = HashMap::new();

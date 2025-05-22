@@ -6,6 +6,7 @@ use std::env;
 use std::path::Path;
 use thiserror::Error;
 
+pub mod add;
 pub mod args;
 pub mod cdm;
 pub mod import;
@@ -66,6 +67,10 @@ async fn main() -> Result<()> {
         Command::Parse(parse_args) => {
             let dir_path = Path::new(&parse_args.path);
             parser::parse(&pool, dir_path).await
+        }
+        Command::Add(add_args) => {
+            let path = Path::new(&add_args.path);
+            add::add(&pool, path).await
         }
         Command::Query(query_args) => query::query(&pool, query_args).await,
         Command::Import(import_args) => import::import(&pool, import_args).await,

@@ -44,6 +44,8 @@ pub struct GlobalOpts {
 pub enum Command {
     /// Parse the results of a crucible iteration and import into DB
     Parse(ParseArgs),
+    /// Add the results from the JSON file
+    Add(AddArgs),
     /// Query the the CDM DB
     Query(QueryArgs),
     /// Import run from OpenSearch CDM DB
@@ -63,6 +65,11 @@ pub struct ImportArgs {
 
 #[derive(Debug, Args)]
 pub struct ParseArgs {
+    pub path: String,
+}
+
+#[derive(Debug, Args)]
+pub struct AddArgs {
     pub path: String,
 }
 
